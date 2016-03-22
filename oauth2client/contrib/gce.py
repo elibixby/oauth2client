@@ -23,7 +23,6 @@ import warnings
 
 import httplib2
 from six.moves import http_client
-from six.moves import urllib
 
 from oauth2client._helpers import _from_bytes
 from oauth2client import util
@@ -36,10 +35,7 @@ __author__ = 'jcgregorio@google.com (Joe Gregorio)'
 logger = logging.getLogger(__name__)
 
 # URI Template for the endpoint that returns access_tokens.
-_METADATA_ROOT = ('http://metadata.google.internal/computeMetadata/v1/'
-                  'instance/service-accounts/default/')
-META = _METADATA_ROOT + 'token'
-_DEFAULT_EMAIL_METADATA = _METADATA_ROOT + 'email'
+_METADATA_ROOT = 'http://metadata.google.internal/0.1/meta-data'
 _SCOPES_WARNING = """\
 You have requested explicit scopes to be used with a GCE service account.
 Using this argument will have no effect on the actual scopes for tokens
@@ -48,28 +44,33 @@ can't be overridden in the request.
 """
 
 
-def _get_service_account_email(http_request=None):
-    """Get the GCE service account email from the current environment.
-
-    Args:
-        http_request: callable, (Optional) a callable that matches the method
-                      signature of httplib2.Http.request, used to make
-                      the request to the metadata service.
-
-    Returns:
-        tuple, A pair where the first entry is an optional response (from a
-        failed request) and the second is service account email found (as
-        a string).
-    """
-    if http_request is None:
+def _get_metadata(http_request=None, *path):
+    if not http_request:
         http_request = httplib2.Http().request
-    response, content = http_request(
-        _DEFAULT_EMAIL_METADATA, headers={'Metadata-Flavor': 'Google'})
+    full_path = "/".join(path.insert(0, _METADATA_ROOT))
+    response, content = http_client.request(
+        full_path,
+        headers={'Metadata-Flavor': 'Google'}
+    )
     if response.status == http_client.OK:
-        content = _from_bytes(content)
-        return None, content
+        return None, json.loads(_from_bytes(content))
     else:
-        return response, content
+        raise AttributeError(
+            (
+                'Failed to retrieve the {} from the Google Compute Engine'
+                'metadata service. Response:\n{}'
+            ).format(full_path, response)
+        )
+
+
+def _get_access_token(http_request, email='default'):
+    token_json = _get_metadata(
+        'service-accounts',
+        email,
+        'acquire',
+        http_request=http_request
+    )
+    return token_json.get('accessToken'), token_json.get('expiresAt')
 
 
 class AppAssertionCredentials(AssertionCredentials):
@@ -86,7 +87,7 @@ class AppAssertionCredentials(AssertionCredentials):
     """
 
     @util.positional(2)
-    def __init__(self, scope='', **kwargs):
+    def __init__(self, scope='', service_account_email='default', **kwargs):
         """Constructor for AppAssertionCredentials
 
         Args:
@@ -97,15 +98,27 @@ class AppAssertionCredentials(AssertionCredentials):
         """
         if scope:
             warnings.warn(_SCOPES_WARNING)
-        # This is just provided for backwards compatibility, but is not
-        # used by this class.
-        self.scope = util.scopes_to_string(scope)
+
+        service_account_json = _get_metadata(
+            'service-accounts',
+            service_account_email
+        )
+
+        self.scope = util.scopes_to_string(
+            service_account_json.get('scopes', [])
+        )
+        self.service_account_email = service_account_json.get(
+            'serviceAccount',
+            None
+        )
+
+        self._project_id = None
+
         self.kwargs = kwargs
 
         # Assertion type is no longer used, but still in the
         # parent class signature.
         super(AppAssertionCredentials, self).__init__(None)
-        self._service_account_email = None
 
     @classmethod
     def from_json(cls, json_data):
@@ -125,21 +138,13 @@ class AppAssertionCredentials(AssertionCredentials):
         Raises:
             HttpAccessTokenRefreshError: When the refresh fails.
         """
-        response, content = http_request(
-            META, headers={'Metadata-Flavor': 'Google'})
-        content = _from_bytes(content)
-        if response.status == http_client.OK:
-            try:
-                token_content = json.loads(content)
-            except Exception as e:
-                raise HttpAccessTokenRefreshError(str(e),
-                                                  status=response.status)
-            self.access_token = token_content['access_token']
-        else:
-            if response.status == http_client.NOT_FOUND:
-                content += (' This can occur if a VM was created'
-                            ' with no service account or scopes.')
-            raise HttpAccessTokenRefreshError(content, status=response.status)
+        try:
+            self.access_token, self.token_expiry = _get_access_token(
+                http_request,
+                email=self.service_account_email
+            )
+        except AttributeError as e:
+            raise HttpAccessTokenRefreshError(str(e))
 
     @property
     def serialization_data(self):
@@ -151,6 +156,12 @@ class AppAssertionCredentials(AssertionCredentials):
 
     def create_scoped(self, scopes):
         return AppAssertionCredentials(scopes, **self.kwargs)
+
+    @property
+    def project_id(self):
+        if not self._project_id:
+            self._project_id = _get_metadata('project-id')
+        return self._project_id
 
     def sign_blob(self, blob):
         """Cryptographically sign a blob (of bytes).
@@ -166,29 +177,5 @@ class AppAssertionCredentials(AssertionCredentials):
             NotImplementedError, always.
         """
         raise NotImplementedError(
-            'Compute Engine service accounts cannot sign blobs')
-
-    @property
-    def service_account_email(self):
-        """Get the email for the current service account.
-
-        Uses the Google Compute Engine metadata service to retrieve the email
-        of the default service account.
-
-        Returns:
-            string, The email associated with the Google Compute Engine
-            service account.
-
-        Raises:
-            AttributeError, if the email can not be retrieved from the Google
-            Compute Engine metadata service.
-        """
-        if self._service_account_email is None:
-            failure, email = _get_service_account_email()
-            if failure is None:
-                self._service_account_email = email
-            else:
-                raise AttributeError('Failed to retrieve the email from the '
-                                     'Google Compute Engine metadata service',
-                                     failure, email)
-        return self._service_account_email
+            'Compute Engine service accounts cannot sign blobs'
+        )
