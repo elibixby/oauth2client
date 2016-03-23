@@ -48,7 +48,7 @@ def _get_metadata(http_request=None, *path):
     if not http_request:
         http_request = httplib2.Http().request
     full_path = "/".join(path.insert(0, _METADATA_ROOT))
-    response, content = http_client.request(
+    response, content = http_request(
         full_path,
         headers={'Metadata-Flavor': 'Google'}
     )
