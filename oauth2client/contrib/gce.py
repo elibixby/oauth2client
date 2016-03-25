@@ -208,7 +208,7 @@ class AppAssertionCredentials(AssertionCredentials):
                 http_request,
                 email=self.service_account_email
             )
-        except Exception as e:
+        except (AttributeError, ValueError) as e:
             raise HttpAccessTokenRefreshError(str(e))
 
     def create_scoped_required(self):
