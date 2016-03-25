@@ -22,6 +22,7 @@ import logging
 import warnings
 
 import httplib2
+import time
 from six.moves import http_client
 
 from oauth2client._helpers import _from_bytes
@@ -35,7 +36,7 @@ __author__ = 'jcgregorio@google.com (Joe Gregorio)'
 logger = logging.getLogger(__name__)
 
 # URI Template for the endpoint that returns access_tokens.
-_METADATA_ROOT = 'http://metadata.google.internal/0.1/meta-data'
+_METADATA_ROOT = 'http://metadata.google.internal/v1/computeMetadata'
 _SCOPES_WARNING = """\
 You have requested explicit scopes to be used with a GCE service account.
 Using this argument will have no effect on the actual scopes for tokens
@@ -45,9 +46,21 @@ can't be overridden in the request.
 
 
 def _get_metadata(http_request=None, *path):
+    """
+    Args:
+        http_request: an httplib2.Http().request object or equivalent
+            with which to make the call to the metadata server
+        *path: a list of strings denoting the metadata server request
+            path.
+    Returns:
+        A deserialized JSON object representing the data returned
+        from the metadata server
+    """
+
     if not http_request:
         http_request = httplib2.Http().request
-    full_path = "/".join(path.insert(0, _METADATA_ROOT))
+
+    full_path = '/'.join(path.insert(0, _METADATA_ROOT)) + '/?recursive=true'
     response, content = http_request(
         full_path,
         headers={'Metadata-Flavor': 'Google'}
@@ -55,26 +68,50 @@ def _get_metadata(http_request=None, *path):
     if response.status == http_client.OK:
         return json.loads(_from_bytes(content))
     else:
-        raise AttributeError(
-            (
-                'Failed to retrieve {} from the Google Compute Engine'
-                'metadata service. Response:\n{}'
-            ).format(full_path, response)
-        )
+        msg = (
+            'Failed to retrieve {} from the Google Compute Engine'
+            'metadata service. Response:\n{}'
+        ).format(full_path, response)
+        raise AttributeError(msg)
 
 
 def _get_access_token(http_request, email):
+    """
+    Args:
+        http_request: an httplib2.Http().request object or equivalent
+            with which to make the call to the metadata server
+        email: The service account email to request an access token with
+    Returns:
+        A tuple (accessToken, token expiry)
+    """
     token_json = _get_metadata(
+        'instance',
         'service-accounts',
         email,
         'acquire',
         http_request=http_request
     )
-    return token_json.get('accessToken'), int(token_json.get('expiresAt'))
+    token_expiry = int(token_json.get('expires_in')) + time.time()
+    return token_json.get('access_token'), token_expiry
 
 
 def _get_service_account_info(email, http_request=None):
+    """
+    Args:
+        http_request: an httplib2.Http().request object or equivalent
+            with which to make the call to the metadata server
+        email: The service account email to request an access token with
+    Returns:
+        A deserialized JSON service account object of the form:
+            {
+               'aliases': [],
+               'scopes': [],
+               'email': "a@example.com"
+            }
+    """
+
     return _get_metadata(
+        'instance',
         'service-accounts',
         email,
         http_request=http_request
@@ -113,8 +150,7 @@ class AppAssertionCredentials(AssertionCredentials):
         if scope:
             warnings.warn(_SCOPES_WARNING)
 
-        self._service_account_email = service_account_email
-        self._service_account_info = None
+        self._service_account_info = {'email': service_account_email}
         self._project_id = None
 
         self.kwargs = kwargs
@@ -124,28 +160,35 @@ class AppAssertionCredentials(AssertionCredentials):
         super(AppAssertionCredentials, self).__init__(None)
 
     @property
+    def service_account_info(self):
+        if self._service_account_info.get('email', 'default') == 'default':
+            self._service_account_info = _get_service_account_info(
+                self._service_account_info.get('email', 'default')
+            )
+        return self._service_account_info
+
+    @property
     def scopes(self):
         return self._retrieve_scopes(httplib2.Http().request)
 
     @property
     def service_account_email(self):
-        if not self._service_account_info:
-            self._service_account_info = _get_service_account_info(
-                self._service_account_email
-            )
-        return self._service_account_info['serviceAccount']
+        return self.service_account_info['email']
+
+    @property
+    def project_id(self):
+        if not self._project_id:
+            self._project_id = _get_metadata('project', 'project-id')
+        return self._project_id
+
+    @property
+    def serialization_data(self):
+        return {
+            'email': self.service_account_email
+        }
 
     def _retrieve_scopes(self, http_request):
-        if not self._service_account_info:
-            self._service_account_info = _get_service_account_info(
-                self._service_account_email,
-                http_request=http_request
-            )
-        return self._service_account_info['scopes']
-
-    @classmethod
-    def from_json(cls, json_data):
-        return AppAssertionCredentials(email=json_data['email'])
+        return self.service_account_info['scopes']
 
     def _refresh(self, http_request):
         """Refreshes the access_token.
@@ -168,23 +211,11 @@ class AppAssertionCredentials(AssertionCredentials):
         except Exception as e:
             raise HttpAccessTokenRefreshError(str(e))
 
-    @property
-    def serialization_data(self):
-        return {
-            'email': self.service_account_email
-        }
-
     def create_scoped_required(self):
         return False
 
     def create_scoped(self, scopes):
         return AppAssertionCredentials(scopes, **self.kwargs)
-
-    @property
-    def project_id(self):
-        if not self._project_id:
-            self._project_id = _get_metadata('project-id')
-        return self._project_id
 
     def sign_blob(self, blob):
         """Cryptographically sign a blob (of bytes).
@@ -201,4 +232,10 @@ class AppAssertionCredentials(AssertionCredentials):
         """
         raise NotImplementedError(
             'Compute Engine service accounts cannot sign blobs'
+        )
+
+    @classmethod
+    def from_json(cls, json_data):
+        return AppAssertionCredentials(
+            service_account_email=json_data['email']
         )
