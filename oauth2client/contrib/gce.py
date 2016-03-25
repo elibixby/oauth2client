@@ -35,7 +35,7 @@ __author__ = 'jcgregorio@google.com (Joe Gregorio)'
 logger = logging.getLogger(__name__)
 
 # URI Template for the endpoint that returns access_tokens.
-_METADATA_ROOT = 'http://metadata.google.internal/computeMetadata/v1'
+_METADATA_ROOT = 'http://metadata.google.internal/0.1/meta-data'
 _SCOPES_WARNING = """\
 You have requested explicit scopes to be used with a GCE service account.
 Using this argument will have no effect on the actual scopes for tokens
@@ -53,7 +53,7 @@ def _get_metadata(http_request=None, *path):
         headers={'Metadata-Flavor': 'Google'}
     )
     if response.status == http_client.OK:
-        return None, json.loads(_from_bytes(content))
+        return json.loads(_from_bytes(content))
     else:
         raise AttributeError(
             (
@@ -65,13 +65,20 @@ def _get_metadata(http_request=None, *path):
 
 def _get_access_token(http_request, email):
     token_json = _get_metadata(
-        'instance'
         'service-accounts',
         email,
-        'token',
+        'acquire',
         http_request=http_request
     )
-    return token_json.get('access_token'), int(token_json.get('expires_at'))
+    return token_json.get('accessToken'), int(token_json.get('expiresAt'))
+
+
+def _get_service_account_info(email, http_request=None):
+    return _get_metadata(
+        'service-accounts',
+        email,
+        http_request=http_request
+    )
 
 
 class AppAssertionCredentials(AssertionCredentials):
@@ -99,14 +106,15 @@ class AppAssertionCredentials(AssertionCredentials):
                 set at VM instance creation time and won't change.
             service_account_email:
                 the email for these credentials. This can be used with custom
-                service accounts, or left blank to use the default service account
-                for the instance. Usually the compute engine service account.
+                service accounts, or left blank to use the default service
+                account for the instance. Usually the compute engine service
+                account.
         """
         if scope:
             warnings.warn(_SCOPES_WARNING)
 
-        self.scopes = None
         self._service_account_email = service_account_email
+        self._service_account_info = None
         self._project_id = None
 
         self.kwargs = kwargs
@@ -116,27 +124,24 @@ class AppAssertionCredentials(AssertionCredentials):
         super(AppAssertionCredentials, self).__init__(None)
 
     @property
-    def service_account_email(self):
-        if self._service_account_email == 'default':
-            self._service_account_email = _get_metadata(
-                'instance',
-                'service-accounts',
-                'default',
-                'email'
-            )
-        return self._service_account_email
+    def scopes(self):
+        return self._retrieve_scopes(httplib2.Http().request)
 
+    @property
+    def service_account_email(self):
+        if not self._service_account_info:
+            self._service_account_info = _get_service_account_info(
+                self._service_account_email
+            )
+        return self._service_account_info['serviceAccount']
 
     def _retrieve_scopes(self, http_request):
-        if not self.scopes:
-            self.scopes = _get_metadata(
-                'instance',
-                'service-accounts',
+        if not self._service_account_info:
+            self._service_account_info = _get_service_account_info(
                 self._service_account_email,
-                'scopes',
                 http_request=http_request
-            ).split('\n')
-        return self.scopes
+            )
+        return self._service_account_info['scopes']
 
     @classmethod
     def from_json(cls, json_data):
@@ -160,7 +165,7 @@ class AppAssertionCredentials(AssertionCredentials):
                 http_request,
                 email=self.service_account_email
             )
-        except Error as e:
+        except Exception as e:
             raise HttpAccessTokenRefreshError(str(e))
 
     @property
