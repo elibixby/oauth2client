@@ -35,7 +35,7 @@ __author__ = 'jcgregorio@google.com (Joe Gregorio)'
 logger = logging.getLogger(__name__)
 
 # URI Template for the endpoint that returns access_tokens.
-_METADATA_ROOT = 'http://metadata.google.internal/0.1/meta-data'
+_METADATA_ROOT = 'http://metadata.google.internal/computeMetadata/v1'
 _SCOPES_WARNING = """\
 You have requested explicit scopes to be used with a GCE service account.
 Using this argument will have no effect on the actual scopes for tokens
@@ -57,20 +57,21 @@ def _get_metadata(http_request=None, *path):
     else:
         raise AttributeError(
             (
-                'Failed to retrieve the {} from the Google Compute Engine'
+                'Failed to retrieve {} from the Google Compute Engine'
                 'metadata service. Response:\n{}'
             ).format(full_path, response)
         )
 
 
-def _get_access_token(http_request, email='default'):
+def _get_access_token(http_request, email):
     token_json = _get_metadata(
+        'instance'
         'service-accounts',
         email,
-        'acquire',
+        'token',
         http_request=http_request
     )
-    return token_json.get('accessToken'), token_json.get('expiresAt')
+    return token_json.get('access_token'), int(token_json.get('expires_at'))
 
 
 class AppAssertionCredentials(AssertionCredentials):
@@ -91,27 +92,21 @@ class AppAssertionCredentials(AssertionCredentials):
         """Constructor for AppAssertionCredentials
 
         Args:
-            scope: string or iterable of strings, scope(s) of the credentials
-                   being requested. Using this argument will have no effect on
-                   the actual scopes for tokens requested. These scopes are
-                   set at VM instance creation time and won't change.
+            scope:
+                string or iterable of strings, scope(s) of the credentials
+                being requested. Using this argument will have no effect on
+                the actual scopes for tokens requested. These scopes are
+                set at VM instance creation time and won't change.
+            service_account_email:
+                the email for these credentials. This can be used with custom
+                service accounts, or left blank to use the default service account
+                for the instance. Usually the compute engine service account.
         """
         if scope:
             warnings.warn(_SCOPES_WARNING)
 
-        service_account_json = _get_metadata(
-            'service-accounts',
-            service_account_email
-        )
-
-        self.scope = util.scopes_to_string(
-            service_account_json.get('scopes', [])
-        )
-        self.service_account_email = service_account_json.get(
-            'serviceAccount',
-            None
-        )
-
+        self.scopes = None
+        self._service_account_email = service_account_email
         self._project_id = None
 
         self.kwargs = kwargs
@@ -120,10 +115,32 @@ class AppAssertionCredentials(AssertionCredentials):
         # parent class signature.
         super(AppAssertionCredentials, self).__init__(None)
 
+    @property
+    def service_account_email(self):
+        if self._service_account_email == 'default':
+            self._service_account_email = _get_metadata(
+                'instance',
+                'service-accounts',
+                'default',
+                'email'
+            )
+        return self._service_account_email
+
+
+    def _retrieve_scopes(self, http_request):
+        if not self.scopes:
+            self.scopes = _get_metadata(
+                'instance',
+                'service-accounts',
+                self._service_account_email,
+                'scopes',
+                http_request=http_request
+            ).split('\n')
+        return self.scopes
+
     @classmethod
     def from_json(cls, json_data):
-        data = json.loads(_from_bytes(json_data))
-        return AppAssertionCredentials(data['scope'])
+        return AppAssertionCredentials(email=json_data['email'])
 
     def _refresh(self, http_request):
         """Refreshes the access_token.
@@ -143,13 +160,14 @@ class AppAssertionCredentials(AssertionCredentials):
                 http_request,
                 email=self.service_account_email
             )
-        except AttributeError as e:
+        except Error as e:
             raise HttpAccessTokenRefreshError(str(e))
 
     @property
     def serialization_data(self):
-        raise NotImplementedError(
-            'Cannot serialize credentials for GCE service accounts.')
+        return {
+            'email': self.service_account_email
+        }
 
     def create_scoped_required(self):
         return False
@@ -160,7 +178,7 @@ class AppAssertionCredentials(AssertionCredentials):
     @property
     def project_id(self):
         if not self._project_id:
-            self._project_id = _get_metadata('project-id')
+            self._project_id = _get_metadata('project', 'project-id')
         return self._project_id
 
     def sign_blob(self, blob):
