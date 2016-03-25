@@ -183,7 +183,7 @@ class AppAssertionCredentials(AssertionCredentials):
     @property
     def project_id(self):
         if not self._project_id:
-            self._project_id = _get_metadata('project', 'project-id')
+            self._project_id = _get_metadata('project-id')
         return self._project_id
 
     def sign_blob(self, blob):
