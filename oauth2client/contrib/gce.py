@@ -132,7 +132,11 @@ class AppAssertionCredentials(AssertionCredentials):
     """
 
     @util.positional(2)
-    def __init__(self, scope='', service_account_email='default', **kwargs):
+    def __init__(self,
+                 scope='',
+                 service_account_email='default',
+                 service_account_info=None,
+                 **kwargs):
         """Constructor for AppAssertionCredentials
 
         Args:
@@ -146,11 +150,15 @@ class AppAssertionCredentials(AssertionCredentials):
                 service accounts, or left blank to use the default service
                 account for the instance. Usually the compute engine service
                 account.
+            service_account_info:
+                Deserialized JSON object, returned by self.service_account_info
         """
         if scope:
             warnings.warn(_SCOPES_WARNING)
 
-        self._service_account_info = {'email': service_account_email}
+        self._service_account_info = service_account_info or {
+            'email': service_account_email
+        }
         self._project_id = None
 
         self.kwargs = kwargs
@@ -169,7 +177,7 @@ class AppAssertionCredentials(AssertionCredentials):
 
     @property
     def scopes(self):
-        return self._retrieve_scopes(httplib2.Http().request)
+        return self._retrieve_scopes()
 
     @property
     def service_account_email(self):
@@ -183,9 +191,7 @@ class AppAssertionCredentials(AssertionCredentials):
 
     @property
     def serialization_data(self):
-        return {
-            'email': self.service_account_email
-        }
+        return self.service_account_info
 
     def _retrieve_scopes(self, http_request):
         return self.service_account_info['scopes']
@@ -237,5 +243,5 @@ class AppAssertionCredentials(AssertionCredentials):
     @classmethod
     def from_json(cls, json_data):
         return AppAssertionCredentials(
-            service_account_email=json_data['email']
+            service_account_info=json_data
         )
