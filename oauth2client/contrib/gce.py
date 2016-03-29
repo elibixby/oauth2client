@@ -75,7 +75,7 @@ def _get_metadata(http_request=None, path=None):
             'Failed to retrieve {path} from the Google Compute Engine'
             'metadata service. Response:\n{error}'
         ).format(path=full_path, error=response)
-        raise AttributeError(msg)
+        raise ValueError(msg)
 
 
 def _get_access_token(http_request, email):
@@ -236,7 +236,7 @@ class AppAssertionCredentials(AssertionCredentials):
                 http_request,
                 self._service_account_info['email']
             )
-        except (AttributeError, ValueError) as e:
+        except ValueError as e:
             raise HttpAccessTokenRefreshError(str(e))
 
     def create_scoped(self, scopes):
