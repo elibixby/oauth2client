@@ -72,9 +72,9 @@ def _get_metadata(http_request=None, path=None):
         return json.loads(_from_bytes(content))
     else:
         msg = (
-            'Failed to retrieve {} from the Google Compute Engine'
-            'metadata service. Response:\n{}'
-        ).format(full_path, response)
+            'Failed to retrieve {path} from the Google Compute Engine'
+            'metadata service. Response:\n{error}'
+        ).format(path=full_path, error=response)
         raise AttributeError(msg)
 
 
