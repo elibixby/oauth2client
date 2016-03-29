@@ -57,11 +57,21 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         self.assertEqual(credentials.assertion_type, None)
 
     @mock.patch('warnings.warn')
-    def test_constructor_with_scopes(self, warn_mock):
-        scope = 'http://example.com/a http://example.com/b'
-        scopes = scope.split()
-        AppAssertionCredentials(scope=scopes)
+    @mock.patch(METADATA_SERVER, return_value=A_SERVICE_ACCOUNT)
+    def test_constructor_with_matching_scopes(self, get_metadata, warn_mock):
+        scope = 'http://www.googleapis.com/auth/cloud-platform'
+        AppAssertionCredentials(scope=scope)
         warn_mock.assert_called_once_with(_SCOPES_WARNING)
+
+    @mock.patch(METADATA_SERVER, return_value=A_SERVICE_ACCOUNT)
+    def test_construtor_with_missing_scopes(self, get_metadata):
+        scope = 'http://wwww.nobodyhasthisscope.com'
+        error = None
+        try:
+            AppAssertionCredentials(scope=scope)
+        except ValueError as e:
+            error = e
+        self.assertIsNotNone(error)
 
     @mock.patch(METADATA_SERVER, return_value=A_SERVICE_ACCOUNT)
     def test_default_service_account_info(self, get_metadata):
@@ -145,6 +155,14 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
             credentials.service_account_info,
             credentials_from_json.service_account_info
         )
+
+    @mock.patch('warnings.warn')
+    @mock.patch(METADATA_SERVER, return_value=A_SERVICE_ACCOUNT)
+    def test_create_scoped_valid(self, get_metadata, warn_mock):
+        scope = 'http://www.googleapis.com/auth/cloud-platform'
+        credentials = AppAssertionCredentials()
+        credentials.create_scoped(scope=scope)
+        warn_mock.assert_called_once_with(_SCOPES_WARNING)
 
     # ERROR TESTS
 

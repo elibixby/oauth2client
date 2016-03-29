@@ -137,9 +137,6 @@ class AppAssertionCredentials(AssertionCredentials):
             service_account_info:
                 Deserialized JSON object, returned by self.service_account_info
         """
-        if scope:
-            warnings.warn(_SCOPES_WARNING)
-
         self._service_account_info = service_account_info or {
             'email': service_account_email
         }
@@ -152,6 +149,9 @@ class AppAssertionCredentials(AssertionCredentials):
         # parent class signature.
         super(AppAssertionCredentials, self).__init__(None)
 
+        if scope:
+            self.scopes = scope
+
     @property
     def service_account_info(self):
         return self._get_service_account_info()
@@ -162,8 +162,14 @@ class AppAssertionCredentials(AssertionCredentials):
 
     @scopes.setter
     def scopes(self, value):
-        """ Scopes on metadata service account are immutable """
-        pass
+        """ Scopes on metadata service account are immutable.
+        We should fail harder in the case that a user sets scopes
+        which are not available on the instance
+        """
+        if self.has_scopes(value):
+            warnings.warn(_SCOPES_WARNING)
+        else:
+            raise ValueError(_SCOPES_WARNING)
 
     @property
     def service_account_email(self):
@@ -228,11 +234,12 @@ class AppAssertionCredentials(AssertionCredentials):
         except (AttributeError, ValueError) as e:
             raise HttpAccessTokenRefreshError(str(e))
 
-    def create_scoped_required(self):
-        return False
-
     def create_scoped(self, scopes):
-        return AppAssertionCredentials(scopes, **self.kwargs)
+        new = AppAssertionCredentials(
+            service_account_info=self.service_account_info
+        )
+        new.scopes = scopes
+        return new
 
     def sign_blob(self, blob):
         """Cryptographically sign a blob (of bytes).
