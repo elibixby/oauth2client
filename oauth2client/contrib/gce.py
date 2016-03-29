@@ -29,7 +29,7 @@ from oauth2client._helpers import _from_bytes
 from oauth2client import util
 from oauth2client.client import HttpAccessTokenRefreshError
 from oauth2client.client import AssertionCredentials
-
+from oauth2client.contrib.iam_signer import IAMSigner
 
 __author__ = 'jcgregorio@google.com (Joe Gregorio)'
 
@@ -143,6 +143,7 @@ class AppAssertionCredentials(AssertionCredentials):
         }
         self._project_id = None
         self._partial = service_account_info is None
+        self._iam_signer = None
 
         if scope:
             if self.has_scopes(scope):
@@ -237,23 +238,6 @@ class AppAssertionCredentials(AssertionCredentials):
             service_account_info=self.service_account_info
         )
 
-    def sign_blob(self, blob):
-        """Cryptographically sign a blob (of bytes).
-
-        This method is provided to support a common interface, but
-        the actual key used for a Google Compute Engine service account
-        is not available, so it can't be used to sign content.
-
-        Args:
-            blob: bytes, Message to be signed.
-
-        Raises:
-            NotImplementedError, always.
-        """
-        raise NotImplementedError(
-            'Compute Engine service accounts cannot sign blobs'
-        )
-
     def to_json(self):
         # Why is this not default -_-
         return self._to_json(
@@ -267,3 +251,12 @@ class AppAssertionCredentials(AssertionCredentials):
         return AppAssertionCredentials(
             service_account_info=data['service_account_info']
         )
+
+    def sign_blob(self, blob):
+        if not self._iam_signer:
+            self._iam_signer = IAMSigner(
+                self,
+                self.project_id,
+                self.service_account_email
+            )
+        return self._iam_signer.sign_blob(blob)
