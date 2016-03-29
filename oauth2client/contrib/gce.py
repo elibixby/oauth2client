@@ -46,7 +46,7 @@ can't be overridden in the request.
 
 
 def _get_metadata(http_request=None, path=None):
-    """
+    """Gets a JSON object from the specified path on the Metadata Server
     Args:
         http_request: an httplib2.Http().request object or equivalent
             with which to make the call to the metadata server
@@ -79,7 +79,7 @@ def _get_metadata(http_request=None, path=None):
 
 
 def _get_access_token(http_request, email):
-    """
+    """Get an access token for the specified email from the Metadata Server.
     Args:
         http_request: an httplib2.Http().request object or equivalent
             with which to make the call to the metadata server
@@ -158,6 +158,12 @@ class AppAssertionCredentials(AssertionCredentials):
 
     @property
     def service_account_info(self):
+        """Info about this service account
+        By using _get_service_account_info this property is
+        always guaranteed to have the following members:
+            'email', 'scopes'
+        It may also have the member: 'aliases'
+        """
         return self._get_service_account_info()
 
     @property
@@ -183,7 +189,7 @@ class AppAssertionCredentials(AssertionCredentials):
         return {'service_account_info': self.service_account_info}
 
     def _get_service_account_info(self, http_request=None):
-        """
+        """Retrieves the full info for a service account and caches it.
         Args:
             http_request: an httplib2.Http().request object or equivalent
                 with which to make the call to the metadata server
@@ -208,7 +214,9 @@ class AppAssertionCredentials(AssertionCredentials):
         return self._service_account_info
 
     def _retrieve_scopes(self, http_request):
-        return self._get_service_account_info(http_request=http_request)
+        return self._get_service_account_info(
+            http_request=http_request
+        )['scopes']
 
     def _refresh(self, http_request):
         """Refreshes the access_token.
@@ -251,11 +259,9 @@ class AppAssertionCredentials(AssertionCredentials):
             NotImplementedError, always.
         """
         raise NotImplementedError(
-            'Compute Engine service accounts cannot sign blobs'
-        )
+            'Compute Engine service accounts cannot sign blobs')
 
     def to_json(self):
-        # Why is this not default -_-
         return self._to_json(
             self.NON_SERIALIZED_MEMBERS,
             to_serialize=self.serialization_data
