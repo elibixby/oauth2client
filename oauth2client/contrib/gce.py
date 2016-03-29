@@ -260,9 +260,5 @@ class AppAssertionCredentials(AssertionCredentials):
 
     def sign_blob(self, blob):
         if not self._iam_signer:
-            self._iam_signer = IAMSigner(
-                self,
-                self.project_id,
-                self.service_account_email
-            )
+            self._iam_signer = IAMSigner.from_credentials(self)
         return self._iam_signer.sign_blob(blob)
