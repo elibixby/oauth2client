@@ -22,7 +22,7 @@ import logging
 import warnings
 
 import httplib2
-import time
+import datetime
 from six.moves import http_client
 
 from oauth2client._helpers import _from_bytes
@@ -45,7 +45,7 @@ can't be overridden in the request.
 """
 
 
-def _get_metadata(http_request=None, *path):
+def _get_metadata(http_request=None, path=None):
     """
     Args:
         http_request: an httplib2.Http().request object or equivalent
@@ -57,10 +57,13 @@ def _get_metadata(http_request=None, *path):
         from the metadata server
     """
 
+    if not path:
+        path = []
+
     if not http_request:
         http_request = httplib2.Http().request
 
-    full_path = '/'.join(path.insert(0, _METADATA_ROOT)) + '/?recursive=true'
+    full_path = _METADATA_ROOT + '/'.join(path) + '/?recursive=true'
     response, content = http_request(
         full_path,
         headers={'Metadata-Flavor': 'Google'}
@@ -85,37 +88,18 @@ def _get_access_token(http_request, email):
         A tuple (accessToken, token expiry)
     """
     token_json = _get_metadata(
-        'instance',
-        'service-accounts',
-        email,
-        'acquire',
-        http_request=http_request
+        http_request=http_request,
+        path=[
+            'instance',
+            'service-accounts',
+            email,
+            'token'
+        ]
     )
-    token_expiry = int(token_json.get('expires_in')) + time.time()
+    token_expiry = datetime.datetime.now() + datetime.timedelta(
+        seconds=token_json.get('expires_in')
+    )
     return token_json.get('access_token'), token_expiry
-
-
-def _get_service_account_info(email, http_request=None):
-    """
-    Args:
-        http_request: an httplib2.Http().request object or equivalent
-            with which to make the call to the metadata server
-        email: The service account email to request an access token with
-    Returns:
-        A deserialized JSON service account object of the form:
-            {
-               'aliases': [],
-               'scopes': [],
-               'email': "a@example.com"
-            }
-    """
-
-    return _get_metadata(
-        'instance',
-        'service-accounts',
-        email,
-        http_request=http_request
-    )
 
 
 class AppAssertionCredentials(AssertionCredentials):
@@ -131,7 +115,7 @@ class AppAssertionCredentials(AssertionCredentials):
     information to generate and refresh its own access tokens.
     """
 
-    @util.positional(2)
+    @util.positional(3)
     def __init__(self,
                  scope='',
                  service_account_email='default',
@@ -160,6 +144,7 @@ class AppAssertionCredentials(AssertionCredentials):
             'email': service_account_email
         }
         self._project_id = None
+        self._partial = service_account_info is None
 
         self.kwargs = kwargs
 
@@ -169,15 +154,16 @@ class AppAssertionCredentials(AssertionCredentials):
 
     @property
     def service_account_info(self):
-        if self._service_account_info.get('email', 'default') == 'default':
-            self._service_account_info = _get_service_account_info(
-                self._service_account_info.get('email', 'default')
-            )
-        return self._service_account_info
+        return self._get_service_account_info()
 
     @property
     def scopes(self):
-        return self._retrieve_scopes()
+        return self.service_account_info['scopes']
+
+    @scopes.setter
+    def scopes(self, value):
+        """ Scopes on metadata service account are immutable """
+        pass
 
     @property
     def service_account_email(self):
@@ -186,15 +172,40 @@ class AppAssertionCredentials(AssertionCredentials):
     @property
     def project_id(self):
         if not self._project_id:
-            self._project_id = _get_metadata('project', 'project-id')
+            self._project_id = _get_metadata(path=['project', 'project-id'])
         return self._project_id
 
     @property
     def serialization_data(self):
-        return self.service_account_info
+        return {'service_account_info': self.service_account_info}
+
+    def _get_service_account_info(self, http_request=None):
+        """
+        Args:
+            http_request: an httplib2.Http().request object or equivalent
+                with which to make the call to the metadata server
+        Returns:
+            A deserialized JSON service account object of the form:
+                {
+                   'aliases': [],
+                   'scopes': [],
+                   'email': 'a@example.com'
+                }
+        """
+        if self._partial:
+            self._service_account_info = _get_metadata(
+                path=[
+                    'instance',
+                    'service-accounts',
+                    self._service_account_info['email'],
+                ],
+                http_request=http_request
+            )
+            self._partial = False
+        return self._service_account_info
 
     def _retrieve_scopes(self, http_request):
-        return self.service_account_info['scopes']
+        return self._get_service_account_info(http_request=http_request)
 
     def _refresh(self, http_request):
         """Refreshes the access_token.
@@ -212,7 +223,7 @@ class AppAssertionCredentials(AssertionCredentials):
         try:
             self.access_token, self.token_expiry = _get_access_token(
                 http_request,
-                email=self.service_account_email
+                self._service_account_info['email']
             )
         except (AttributeError, ValueError) as e:
             raise HttpAccessTokenRefreshError(str(e))
@@ -240,8 +251,16 @@ class AppAssertionCredentials(AssertionCredentials):
             'Compute Engine service accounts cannot sign blobs'
         )
 
+    def to_json(self):
+        # Why is this not default -_-
+        return self._to_json(
+            self.NON_SERIALIZED_MEMBERS,
+            to_serialize=self.serialization_data
+        )
+
     @classmethod
     def from_json(cls, json_data):
+        data = json.loads(json_data)
         return AppAssertionCredentials(
-            service_account_info=json_data
+            service_account_info=data['service_account_info']
         )
