@@ -227,7 +227,7 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         error = None
         try:
             credentials._retrieve_scopes(http.request)
-        except AttributeError as e:
+        except ValueError as e:
             error = e
 
         self.assertIsNotNone(error)
@@ -268,7 +268,7 @@ class Test__get_metadata(unittest2.TestCase):
         error = None
         try:
             _get_metadata(http_request)
-        except AttributeError as e:
+        except ValueError as e:
             error = e
 
         self.assertIsNotNone(error)
