@@ -160,8 +160,7 @@ class AppAssertionCredentials(AssertionCredentials):
     def service_account_info(self):
         """Info about this service account
         By using _get_service_account_info this property is
-        always guaranteed to have the following members:
-            'email', 'scopes'
+        always guaranteed to have the members ['email', 'scopes'].
         It may also have the member: 'aliases'
         """
         return self._get_service_account_info()
