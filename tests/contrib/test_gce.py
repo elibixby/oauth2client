@@ -59,7 +59,7 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
     @mock.patch('warnings.warn')
     @mock.patch(METADATA_SERVER, return_value=A_SERVICE_ACCOUNT)
     def test_constructor_with_matching_scopes(self, get_metadata, warn_mock):
-        scope = 'http://www.googleapis.com/auth/cloud-platform'
+        scope = 'https://www.googleapis.com/auth/cloud-platform'
         AppAssertionCredentials(scope=scope)
         warn_mock.assert_called_once_with(_SCOPES_WARNING)
 
@@ -159,9 +159,9 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
     @mock.patch('warnings.warn')
     @mock.patch(METADATA_SERVER, return_value=A_SERVICE_ACCOUNT)
     def test_create_scoped_valid(self, get_metadata, warn_mock):
-        scope = 'http://www.googleapis.com/auth/cloud-platform'
+        scope = 'https://www.googleapis.com/auth/cloud-platform'
         credentials = AppAssertionCredentials()
-        credentials.create_scoped(scope=scope)
+        credentials.create_scoped(scope)
         warn_mock.assert_called_once_with(_SCOPES_WARNING)
 
     # ERROR TESTS

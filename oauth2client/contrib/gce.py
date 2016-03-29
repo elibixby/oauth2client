@@ -117,7 +117,7 @@ class AppAssertionCredentials(AssertionCredentials):
 
     @util.positional(3)
     def __init__(self,
-                 scope='',
+                 scope=None,
                  service_account_email='default',
                  service_account_info=None,
                  **kwargs):
@@ -137,20 +137,24 @@ class AppAssertionCredentials(AssertionCredentials):
             service_account_info:
                 Deserialized JSON object, returned by self.service_account_info
         """
+
         self._service_account_info = service_account_info or {
             'email': service_account_email
         }
         self._project_id = None
         self._partial = service_account_info is None
 
+        if scope:
+            if self.has_scopes(scope):
+                warnings.warn(_SCOPES_WARNING)
+            else:
+                raise ValueError(_SCOPES_WARNING)
+
         self.kwargs = kwargs
 
         # Assertion type is no longer used, but still in the
         # parent class signature.
         super(AppAssertionCredentials, self).__init__(None)
-
-        if scope:
-            self.scopes = scope
 
     @property
     def service_account_info(self):
@@ -162,14 +166,7 @@ class AppAssertionCredentials(AssertionCredentials):
 
     @scopes.setter
     def scopes(self, value):
-        """ Scopes on metadata service account are immutable.
-        We should fail harder in the case that a user sets scopes
-        which are not available on the instance
-        """
-        if self.has_scopes(value):
-            warnings.warn(_SCOPES_WARNING)
-        else:
-            raise ValueError(_SCOPES_WARNING)
+        pass
 
     @property
     def service_account_email(self):
@@ -235,11 +232,10 @@ class AppAssertionCredentials(AssertionCredentials):
             raise HttpAccessTokenRefreshError(str(e))
 
     def create_scoped(self, scopes):
-        new = AppAssertionCredentials(
+        return AppAssertionCredentials(
+            scope=scopes,
             service_account_info=self.service_account_info
         )
-        new.scopes = scopes
-        return new
 
     def sign_blob(self, blob):
         """Cryptographically sign a blob (of bytes).
