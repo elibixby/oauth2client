@@ -45,7 +45,10 @@ can't be overridden in the request.
 """
 
 
-def _get_metadata(http_request=None, path=None, recursive=True):
+def _get_metadata(http_request=None,
+                  path=None,
+                  recursive=True,
+                  returns_json=True):
     """Gets a JSON object from the specified path on the Metadata Server
     Args:
         http_request: an httplib2.Http().request object or equivalent
@@ -187,7 +190,8 @@ class AppAssertionCredentials(AssertionCredentials):
         if not self._project_id:
             self._project_id = _get_metadata(
                 path=['project', 'project-id'],
-                recursive=False
+                recursive=False,
+                returns_json=False
             )
         return self._project_id
 
