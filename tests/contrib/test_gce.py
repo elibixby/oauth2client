@@ -176,7 +176,10 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         http = mock.MagicMock()
         content = '{BADJSON'
         http.request = mock.MagicMock(
-            return_value=(mock.Mock(status=http_client.OK), content))
+            return_value=(httplib2.Response({
+                'status': http_client.OK,
+                'content-type': 'application/json'
+            }), content))
 
         credentials = AppAssertionCredentials()
         self.assertRaises(
@@ -254,7 +257,8 @@ class Test__get_metadata(unittest2.TestCase):
         http_request = mock.MagicMock()
         data = json.dumps(A_SERVICE_ACCOUNT).encode('utf-8')
         http_request.return_value = (
-            httplib2.Response({'status': http_client.OK}), data)
+            httplib2.Response({'status': http_client.OK,
+                               'content-type': 'application/json'}), data)
         result = _get_metadata(http_request)
         self.assertEqual(result, json.loads(data.decode('utf-8')))
         http_request.assert_called_once_with(
