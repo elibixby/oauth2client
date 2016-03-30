@@ -82,7 +82,8 @@ class IAMSignerTests(unittest2.TestCase):
                     path=[
                         'project',
                         'project-id'
-                    ]
+                    ],
+                    recursive=False
                 )
             ])
 
