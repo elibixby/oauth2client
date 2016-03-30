@@ -45,7 +45,7 @@ can't be overridden in the request.
 """
 
 
-def _get_metadata(http_request=None, path=None):
+def _get_metadata(http_request=None, path=None, recursive=True):
     """Gets a JSON object from the specified path on the Metadata Server
     Args:
         http_request: an httplib2.Http().request object or equivalent
@@ -63,13 +63,18 @@ def _get_metadata(http_request=None, path=None):
     if not http_request:
         http_request = httplib2.Http().request
 
-    full_path = _METADATA_ROOT + '/'.join(path) + '/?recursive=true'
+    r_string = '/?recursive=true' if recursive else ''
+    full_path = _METADATA_ROOT + '/'.join(path) + r_string
     response, content = http_request(
         full_path,
         headers={'Metadata-Flavor': 'Google'}
     )
     if response.status == http_client.OK:
-        return json.loads(_from_bytes(content))
+        decoded = _from_bytes(content)
+        if recursive:
+            return json.loads(decoded)
+        else:
+            return decoded
     else:
         msg = (
             'Failed to retrieve {path} from the Google Compute Engine'
@@ -180,7 +185,10 @@ class AppAssertionCredentials(AssertionCredentials):
     @property
     def project_id(self):
         if not self._project_id:
-            self._project_id = _get_metadata(path=['project', 'project-id'])
+            self._project_id = _get_metadata(
+                path=['project', 'project-id'],
+                recursive=False
+            )
         return self._project_id
 
     @property
