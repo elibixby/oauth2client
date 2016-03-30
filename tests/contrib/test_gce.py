@@ -281,6 +281,18 @@ class Test__get_metadata(unittest2.TestCase):
             _METADATA_ROOT + '/?recursive=true',
             headers={'Metadata-Flavor': 'Google'})
 
+    def test_success_not_json(self):
+        http_request = mock.MagicMock()
+        data = '12345'.encode('utf-8')
+        http_request.return_value = (
+            httplib2.Response({'status': http_client.OK,
+                               'content-type': 'text/plain'}), data)
+        result = _get_metadata(http_request, recursive=False)
+        self.assertEqual(result, data.decode('utf-8'))
+        http_request.assert_called_once_with(
+            _METADATA_ROOT,
+            headers={'Metadata-Flavor': 'Google'})
+
 
 if __name__ == '__main__':  # pragma: NO COVER
     unittest2.main()
