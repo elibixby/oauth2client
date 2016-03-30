@@ -64,6 +64,7 @@ def _get_metadata(http_request=None, path=None, recursive=True):
             with which to make the call to the metadata server
         path: a list of strings denoting the metadata server request
             path.
+
     Returns:
         A deserialized JSON object representing the data returned
         from the metadata server
@@ -102,6 +103,7 @@ def _get_access_token(http_request, email):
         http_request: an httplib2.Http().request object or equivalent
             with which to make the call to the metadata server
         email: The service account email to request an access token with
+
     Returns:
         A tuple (accessToken, token expiry)
     """
