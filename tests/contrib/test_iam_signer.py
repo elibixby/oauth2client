@@ -83,7 +83,8 @@ class IAMSignerTests(unittest2.TestCase):
                         'project',
                         'project-id'
                     ],
-                    recursive=False
+                    recursive=False,
+                    returns_json=False
                 )
             ])
 
