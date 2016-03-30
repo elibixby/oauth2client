@@ -193,13 +193,9 @@ class AppAssertionCredentials(AssertionCredentials):
     def service_account_info(self):
         """Info about this service account.
 
-        this property is a deserialized JSON service account object of the form
-        {
-            'aliases': [...],
-            'scopes': [...],
-            'email': 'a@example.com'
-        }
-        Where 'scopes' and 'email' will always be present
+        This property is a deserialized JSON service account object of the form
+        {'aliases': [...], 'scopes': [...], 'email': 'a@example.com'}
+        where 'scopes' and 'email' will always be present.
         """
         return self._get_service_account_info()
 
