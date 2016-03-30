@@ -132,6 +132,7 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
                 'project',
                 'project-id'
             ],
+            recursive=False
         )
 
     def test_refresh_token(self):
