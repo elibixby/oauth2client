@@ -28,6 +28,8 @@ from oauth2client.contrib.gce import _SCOPES_WARNING,\
     _METADATA_ROOT,\
     _get_metadata,\
     AppAssertionCredentials
+from oauth2client.contrib.iam_signer import IAM_SIGN_BLOB_ENDPOINT
+from tests.contrib.test_iam_signer import _http_mock
 import tempfile
 
 __author__ = 'jcgregorio@google.com (Joe Gregorio)'
@@ -164,12 +166,67 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         credentials.create_scoped(scope)
         warn_mock.assert_called_once_with(_SCOPES_WARNING)
 
-    # ERROR TESTS
+    def test_sign_blob(self):
+        with mock.patch(METADATA_SERVER,
+                        side_effect=[A_SERVICE_ACCOUNT,
+                                     'a-project-id',
+                                     FOREVER_TOKEN]) as m:
+            http = _http_mock(
+                http_client.OK,
+                {'keyId': '1234', 'signature': 'FoOB4R'}
+            )
+            request_orig = http.request
+            with mock.patch('httplib2.Http', return_value=http):
+                credentials = AppAssertionCredentials()
+                self.assertIsNone(credentials._iam_signer)
+                key_id, signature = credentials.sign_blob(b'1234')
+                m.assert_has_calls([
+                    mock.call(
+                        path=[
+                            'instance',
+                            'service-accounts',
+                            'default'
+                        ],
+                        http_request=None
+                    ),
+                    mock.call(
+                        path=[
+                            'project',
+                            'project-id'
+                        ]
+                    ),
+                    mock.call(
+                        path=[
+                            'instance',
+                            'service-accounts',
+                            A_SERVICE_ACCOUNT['email'],
+                            'token'
+                        ],
+                        http_request=request_orig
+                    )
+                ])
+                self.assertIsNotNone(credentials._iam_signer)
+                self.assertEquals((key_id, signature), ('1234', 'FoOB4R'))
 
-    def test_sign_blob_not_implemented(self):
-        credentials = AppAssertionCredentials([])
-        with self.assertRaises(NotImplementedError):
-            credentials.sign_blob(b'blob')
+            request_orig.assert_called_once_with(
+                IAM_SIGN_BLOB_ENDPOINT.format(
+                    project_id='a-project-id',
+                    service_account_email=A_SERVICE_ACCOUNT['email']
+                ),
+                'POST',
+                json.dumps({'bytesToSign': b'1234'}),
+                {'Authorization': 'Bearer ' + FOREVER_TOKEN['access_token']},
+                5,
+                None
+            )
+
+    @mock.patch(METADATA_SERVER, return_value=A_SERVICE_ACCOUNT)
+    def test_save_to_well_known_file(self, get_metadata):
+        with tempfile.NamedTemporaryFile() as f:
+            credentials = AppAssertionCredentials()
+            save_to_well_known_file(credentials, well_known_file=f.name)
+
+    # ERROR TESTS
 
     def test_refresh_failure_bad_json(self):
         http = mock.MagicMock()
@@ -239,12 +296,6 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         self.assertFalse(
             'scopes' in credentials._service_account_info
         )
-
-    @mock.patch(METADATA_SERVER, return_value=A_SERVICE_ACCOUNT)
-    def test_save_to_well_known_file(self, get_metadata):
-        with tempfile.NamedTemporaryFile() as f:
-            credentials = AppAssertionCredentials()
-            save_to_well_known_file(credentials, well_known_file=f.name)
 
 
 class Test__get_metadata(unittest2.TestCase):
