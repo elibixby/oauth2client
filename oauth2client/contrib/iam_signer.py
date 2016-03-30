@@ -1,52 +1,54 @@
 from six.moves import http_client
-from oauth2client._helpers import _from_bytes,\
-    _json_encode
-from oauth2client import util
+from oauth2client._helpers import _from_bytes
 import httplib2
 import json
 
 __author__ = 'elibixby@google.com (Eli Bixby)'
 
-IAM_SERVICE_ACCOUNT_ENDPOINT = (
+IAM_SIGN_BLOB_ENDPOINT = (
     'https://iam.googleapis.com/v1/projects/{project_id}/'
     'serviceAccounts/{service_account_email}:signBlob'
 )
 
-IAM_SCOPES = [
+IAM_SCOPES = set([
     'https://www.googleapis.com/auth/iam',
     'https://www.googleapis.com/auth/cloud-platform'
-]
+])
 
 
 class IAMSigner:
 
-    @util.positional(1)
-    def __init__(self,
-                 project_id=None,
-                 service_account_email=None,
-                 http=None):
+    def __init__(self, project_id, service_account_email, http):
         """Constructor for IAMSigner.
         Args:
             project_id:
                 the project id for the project that owns the specified service
                 account
             service_account_email:
-                the email for the service account to sign with
+                the email for the service account to sign blobs with
             http:
                 an httplib2.Http like client that is authenticated with
-                the proper scopes to call the iam API, and able to access
-                the service account given in 'service_account_email'.
-                Scopes can be checked with IAMSigner.has_scopes(credentials)
+                the proper scopes to call the iam API, and have
+                "roles/iam.serviceAccountActor" on the service account
+                specified with project_id and service_account_email.
+                Scopes can be checked with
+                `(set(scopes) & iam_signer.IAM_SCOPES)`.
+                Role permissions may be checked by attempting to sign a blob,
+                or making a testIamPermissions call
+                see: https://cloud.google.com/iam/reference/rest/v1/
         """
-        self._iam_endpoint = IAM_SERVICE_ACCOUNT_ENDPOINT.format(
+        self._iam_endpoint = IAM_SIGN_BLOB_ENDPOINT.format(
             project_id=project_id,
             service_account_email=service_account_email
         )
         self._http = http
 
     @classmethod
-    def from_credentials(cls, credentials):
-        if not cls.check_scopes(credentials):
+    def from_credentials(cls, credentials, http=None):
+        """Convenience method, constructs an IAMSigner from credentials.
+
+        """
+        if not set(credentials.scopes) & IAM_SCOPES:
             raise ValueError(
                 ('Insufficient scopes to sign a blob with iam,'
                  'requires one of {iam_scopes}').format(iam_scopes=IAM_SCOPES)
@@ -54,15 +56,7 @@ class IAMSigner:
         return cls(
             credentials.project_id,
             credentials.service_account_email,
-            credentials.authorize(httplib2.Http())
-        )
-
-    @classmethod
-    def has_scopes(cls, credentials):
-        return credentials.has_scopes(
-            IAM_SCOPES[0]
-        ) or credentials.has_scopes(
-            IAM_SCOPES[1]
+            credentials.authorize(http or httplib2.Http())
         )
 
     def sign_blob(self, blob):
@@ -72,7 +66,7 @@ class IAMSigner:
         response, content = self._http.request(
             self._iam_endpoint,
             method='POST',
-            body=_json_encode({'bytesToSign': blob})
+            body=json.dumps({'bytesToSign': blob})
         )
 
         if response.status == http_client.OK:
