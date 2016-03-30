@@ -36,7 +36,7 @@ __author__ = 'jcgregorio@google.com (Joe Gregorio)'
 logger = logging.getLogger(__name__)
 
 # URI Template for the endpoint that returns access_tokens.
-_METADATA_ROOT = 'http://metadata.google.internal/v1/computeMetadata/'
+_METADATA_ROOT = 'http://metadata.google.internal/computeMetadata/v1/'
 _SCOPES_WARNING = """\
 You have requested explicit scopes to be used with a GCE service account.
 Using this argument will have no effect on the actual scopes for tokens
