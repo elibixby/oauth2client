@@ -74,7 +74,7 @@ def _get_metadata(http_request=None,
     )
     if response.status == http_client.OK:
         decoded = _from_bytes(content)
-        if recursive:
+        if returns_json:
             return json.loads(decoded)
         else:
             return decoded
@@ -102,7 +102,8 @@ def _get_access_token(http_request, email):
             'service-accounts',
             email,
             'token'
-        ]
+        ],
+        recursive=False
     )
     token_expiry = datetime.datetime.now() + datetime.timedelta(
         seconds=token_json.get('expires_in')
