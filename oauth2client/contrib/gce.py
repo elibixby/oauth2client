@@ -239,6 +239,7 @@ class AppAssertionCredentials(AssertionCredentials):
         Args:
             http_request: an httplib2.Http().request object or equivalent
                 with which to make the call to the metadata server
+
         Returns:
             A deserialized JSON service account object of the form:
                 {
