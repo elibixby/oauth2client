@@ -16,19 +16,18 @@
 
 Utilities for making it easier to use OAuth 2.0 on Google Compute Engine.
 """
-
+import datetime
 import json
 import logging
 import warnings
-import datetime
 
 import httplib2
 from six.moves import http_client
 
-from oauth2client._helpers import _from_bytes
 from oauth2client.client import HttpAccessTokenRefreshError
 from oauth2client.client import AssertionCredentials
-
+from oauth2client._helpers import _from_bytes
+from oauth2client.contrib.iam_signer import IAMSigner
 
 __author__ = 'jcgregorio@google.com (Joe Gregorio)'
 
