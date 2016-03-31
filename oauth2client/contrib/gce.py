@@ -20,13 +20,12 @@ Utilities for making it easier to use OAuth 2.0 on Google Compute Engine.
 import json
 import logging
 import warnings
+import datetime
 
 import httplib2
-import datetime
 from six.moves import http_client
 
 from oauth2client._helpers import _from_bytes
-from oauth2client import util
 from oauth2client.client import HttpAccessTokenRefreshError
 from oauth2client.client import AssertionCredentials
 from oauth2client.contrib.iam_signer import IAMSigner
@@ -39,22 +38,33 @@ logger = logging.getLogger(__name__)
 _METADATA_ROOT = 'http://metadata.google.internal/computeMetadata/v1/'
 _SCOPES_WARNING = """\
 You have requested explicit scopes to be used with a GCE service account.
-Using this argument will have no effect on the actual scopes for tokens
-requested. These scopes are set at VM instance creation time and
-can't be overridden in the request.
+These scopes *are* present on the credentials; but this argument will have
+no effect on the actual scopes for tokens requested. The credentials scopes
+are set at VM instance creation time and can't be overridden in the request.
+To learn more go to: https://cloud.google.com/compute/docs/authentication
 """
+_SCOPES_ERROR = """\
+You have requested explicit scopes to be used with a GCE service account
+which are not available on the credentials. The scopes are set at VM instance
+creation time and can't be overridden in the request.
+To learn more go to: https://cloud.google.com/compute/docs/authentication
+"""
+_NOW = datetime.datetime.now
 
 
-def _get_metadata(http_request=None,
-                  path=None,
-                  recursive=True,
-                  returns_json=True):
+class MetadataServerHttpError(Exception):
+    """Error for Http failures originating from the Metadata Server"""
+
+
+def _get_metadata(http_request=None, path=None, recursive=True):
     """Gets a JSON object from the specified path on the Metadata Server
+
     Args:
         http_request: an httplib2.Http().request object or equivalent
             with which to make the call to the metadata server
-        *path: a list of strings denoting the metadata server request
+        path: a list of strings denoting the metadata server request
             path.
+
     Returns:
         A deserialized JSON object representing the data returned
         from the metadata server
@@ -74,7 +84,7 @@ def _get_metadata(http_request=None,
     )
     if response.status == http_client.OK:
         decoded = _from_bytes(content)
-        if returns_json:
+        if response['content-type'] == 'application/json':
             return json.loads(decoded)
         else:
             return decoded
@@ -83,32 +93,38 @@ def _get_metadata(http_request=None,
             'Failed to retrieve {path} from the Google Compute Engine'
             'metadata service. Response:\n{error}'
         ).format(path=full_path, error=response)
-        raise ValueError(msg)
+        raise MetadataServerHttpError(msg)
 
 
 def _get_access_token(http_request, email):
     """Get an access token for the specified email from the Metadata Server.
+
     Args:
         http_request: an httplib2.Http().request object or equivalent
             with which to make the call to the metadata server
         email: The service account email to request an access token with
+
     Returns:
         A tuple (accessToken, token expiry)
     """
-    token_json = _get_metadata(
-        http_request=http_request,
-        path=[
-            'instance',
-            'service-accounts',
-            email,
-            'token'
-        ],
-        recursive=False
+    try:
+        token_json = _get_metadata(
+            http_request=http_request,
+            path=[
+                'instance',
+                'service-accounts',
+                email,
+                'token'
+            ],
+            recursive=False
+        )
+    except MetadataServerHttpError as failed_fetch:
+        raise HttpAccessTokenRefreshError(str(failed_fetch))
+
+    token_expiry = _NOW() + datetime.timedelta(
+        seconds=token_json['expires_in']
     )
-    token_expiry = datetime.datetime.now() + datetime.timedelta(
-        seconds=token_json.get('expires_in')
-    )
-    return token_json.get('access_token'), token_expiry
+    return token_json['access_token'], token_expiry
 
 
 class AppAssertionCredentials(AssertionCredentials):
@@ -124,12 +140,11 @@ class AppAssertionCredentials(AssertionCredentials):
     information to generate and refresh its own access tokens.
     """
 
-    @util.positional(3)
     def __init__(self,
                  scope=None,
                  service_account_email='default',
                  service_account_info=None,
-                 **kwargs):
+                 **unused_kwargs):
         """Constructor for AppAssertionCredentials
 
         Args:
@@ -141,10 +156,17 @@ class AppAssertionCredentials(AssertionCredentials):
             service_account_email:
                 the email for these credentials. This can be used with custom
                 service accounts, or left blank to use the default service
-                account for the instance. Usually the compute engine service
-                account.
+                account for the instance. The default service account is
+                usually the shared Compute Engine service account.
             service_account_info:
-                Deserialized JSON object, returned by self.service_account_info
+                (Optional) Dictionary containing information about a
+                service account (typically deserialized from JSON).
+                If passed in, will be used as ``service_account_info``
+                property. Otherwise, the Compute Engine metadata server
+                will be used to determine this value. Additionally,
+                if present the 'email' field in this argument must be
+                provided and will override the ``service_account_email``
+                argument.
         """
 
         self._service_account_info = service_account_info or {
@@ -154,24 +176,27 @@ class AppAssertionCredentials(AssertionCredentials):
         self._partial = service_account_info is None
         self._iam_signer = None
 
-        if scope:
-            if self.has_scopes(scope):
-                warnings.warn(_SCOPES_WARNING)
-            else:
-                raise ValueError(_SCOPES_WARNING)
+        self.kwargs = unused_kwargs
 
-        self.kwargs = kwargs
+        # This function call must be made because AssertionCredentials
+        # will not pass the scopes kwarg to parent class
+        self._check_scopes_and_notify(scope)
 
         # Assertion type is no longer used, but still in the
         # parent class signature.
-        super(AppAssertionCredentials, self).__init__(None)
+        super(AppAssertionCredentials, self).__init__(
+            None,
+            scopes=scope,
+            **unused_kwargs
+        )
 
     @property
     def service_account_info(self):
-        """Info about this service account
-        By using _get_service_account_info this property is
-        always guaranteed to have the members ['email', 'scopes'].
-        It may also have the member: 'aliases'
+        """Info about this service account.
+
+        This property is a deserialized JSON service account object of the form
+        {'aliases': [...], 'scopes': [...], 'email': 'a@example.com'}
+        where 'scopes' and 'email' will always be present.
         """
         return self._get_service_account_info()
 
@@ -181,7 +206,7 @@ class AppAssertionCredentials(AssertionCredentials):
 
     @scopes.setter
     def scopes(self, value):
-        pass
+        self._check_scopes_and_notify(value)
 
     @property
     def service_account_email(self):
@@ -192,8 +217,7 @@ class AppAssertionCredentials(AssertionCredentials):
         if not self._project_id:
             self._project_id = _get_metadata(
                 path=['project', 'project-id'],
-                recursive=False,
-                returns_json=False
+                recursive=False
             )
         return self._project_id
 
@@ -201,16 +225,25 @@ class AppAssertionCredentials(AssertionCredentials):
     def serialization_data(self):
         return {'service_account_info': self.service_account_info}
 
+    def _check_scopes_and_notify(self, scopes):
+        if scopes:
+            if self.has_scopes(scopes):
+                warnings.warn(_SCOPES_WARNING)
+            else:
+                raise AttributeError(_SCOPES_ERROR)
+
     def _get_service_account_info(self, http_request=None):
-        """Retrieves the full info for a service account and caches it.
+        """Retrieves the full info for a service account and caches it
+
         Args:
             http_request: an httplib2.Http().request object or equivalent
                 with which to make the call to the metadata server
+
         Returns:
             A deserialized JSON service account object of the form:
                 {
-                   'aliases': [],
-                   'scopes': [],
+                   'aliases': [...],
+                   'scopes': [...],
                    'email': 'a@example.com'
                 }
         """
@@ -244,19 +277,16 @@ class AppAssertionCredentials(AssertionCredentials):
         Raises:
             HttpAccessTokenRefreshError: When the refresh fails.
         """
-        try:
-            self.access_token, self.token_expiry = _get_access_token(
-                http_request,
-                self._service_account_info['email']
-            )
-        except ValueError as e:
-            raise HttpAccessTokenRefreshError(str(e))
+        self.access_token, self.token_expiry = _get_access_token(
+            http_request,
+            self._service_account_info['email']
+        )
 
     def create_scoped(self, scopes):
-        return AppAssertionCredentials(
-            scope=scopes,
-            service_account_info=self.service_account_info
-        )
+        # Trigger warning or error based on scopes
+        self.scopes = scopes
+        # No need for new object creation
+        return self
 
     def to_json(self):
         return self._to_json(

@@ -13,24 +13,24 @@
 # limitations under the License.
 
 """Unit tests for oauth2client.contrib.gce."""
-
-from six.moves import http_client
-import unittest2
-import time
-import mock
 import json
+import tempfile
+import unittest2
+import mock
+from datetime import datetime
+from datetime import timedelta
 
 import httplib2
-from oauth2client.client import HttpAccessTokenRefreshError,\
-    Credentials,\
-    save_to_well_known_file
-from oauth2client.contrib.gce import _SCOPES_WARNING,\
-    _METADATA_ROOT,\
-    _get_metadata,\
-    AppAssertionCredentials
-from oauth2client.contrib.iam_signer import IAM_SIGN_BLOB_ENDPOINT
-from tests.contrib.test_iam_signer import _http_mock
-import tempfile
+from six.moves import http_client
+from oauth2client.client import HttpAccessTokenRefreshError
+from oauth2client.client import Credentials
+from oauth2client.client import save_to_well_known_file
+from oauth2client.contrib.gce import _SCOPES_WARNING
+from oauth2client.contrib.gce import _METADATA_ROOT
+from oauth2client.contrib.gce import _get_metadata
+from oauth2client.contrib.gce import AppAssertionCredentials
+from oauth2client.contrib.gce import MetadataServerHttpError
+
 
 __author__ = 'jcgregorio@google.com (Joe Gregorio)'
 
@@ -45,13 +45,10 @@ A_SERVICE_ACCOUNT = {
 }
 
 GET_ACCESS_TOKEN = 'oauth2client.contrib.gce._get_access_token'
-ONE_SECOND_TOKEN = {'access_token': '12345abcde', 'expires_in': 1}
 FOREVER_TOKEN = {'access_token': '12345abcde', 'expires_in': 999999999}
 
 
 class AppAssertionCredentialsTests(unittest2.TestCase):
-
-    # BASIC TESTS
 
     def test_constructor(self):
         credentials = AppAssertionCredentials(foo='bar')
@@ -62,32 +59,35 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
     @mock.patch(METADATA_SERVER, return_value=A_SERVICE_ACCOUNT)
     def test_constructor_with_matching_scopes(self, get_metadata, warn_mock):
         scope = 'https://www.googleapis.com/auth/cloud-platform'
-        AppAssertionCredentials(scope=scope)
+        credentials = AppAssertionCredentials(scope=scope)
+        self.assertEqual(
+            credentials.scopes,
+            get_metadata.return_value['scopes']
+        )
         warn_mock.assert_called_once_with(_SCOPES_WARNING)
 
     @mock.patch(METADATA_SERVER, return_value=A_SERVICE_ACCOUNT)
     def test_construtor_with_missing_scopes(self, get_metadata):
         scope = 'http://wwww.nobodyhasthisscope.com'
-        error = None
-        try:
+        with self.assertRaises(AttributeError):
             AppAssertionCredentials(scope=scope)
-        except ValueError as e:
-            error = e
-        self.assertIsNotNone(error)
 
     @mock.patch(METADATA_SERVER, return_value=A_SERVICE_ACCOUNT)
     def test_default_service_account_info(self, get_metadata):
         credentials = AppAssertionCredentials()
-        self.assertEquals(
+        self.assertEqual(
             credentials._service_account_info,
             DEFAULT_SERVICE_ACCOUNT
         )
-        self.assertEquals(credentials.scopes, A_SERVICE_ACCOUNT['scopes'])
-        self.assertEquals(
-            credentials.service_account_email,
-            A_SERVICE_ACCOUNT['email']
+        self.assertEqual(
+            credentials.scopes,
+            get_metadata.return_value['scopes']
         )
-        self.assertEquals(credentials.service_account_info, A_SERVICE_ACCOUNT)
+        self.assertEqual(
+            credentials.service_account_email,
+            get_metadata.return_value['email']
+        )
+        self.assertEqual(credentials.service_account_info, A_SERVICE_ACCOUNT)
         get_metadata.assert_called_once_with(
             path=[
                 'instance',
@@ -100,23 +100,26 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
     @mock.patch(METADATA_SERVER, return_value=A_SERVICE_ACCOUNT)
     def test_custom_service_account_info(self, get_metadata):
         credentials = AppAssertionCredentials(
-            service_account_email=A_SERVICE_ACCOUNT['email']
+            service_account_email=get_metadata.return_value['email']
         )
-        self.assertEquals(
+        self.assertEqual(
             credentials._service_account_info,
-            {'email': A_SERVICE_ACCOUNT['email']}
+            {'email': get_metadata.return_value['email']}
         )
-        self.assertEquals(credentials.scopes, A_SERVICE_ACCOUNT['scopes'])
-        self.assertEquals(
+        self.assertEqual(
+            credentials.scopes,
+            get_metadata.return_value['scopes']
+        )
+        self.assertEqual(
             credentials.service_account_email,
-            A_SERVICE_ACCOUNT['email']
+            get_metadata.return_value['email']
         )
-        self.assertEquals(credentials.service_account_info, A_SERVICE_ACCOUNT)
+        self.assertEqual(credentials.service_account_info, A_SERVICE_ACCOUNT)
         get_metadata.assert_called_once_with(
             path=[
                 'instance',
                 'service-accounts',
-                A_SERVICE_ACCOUNT['email']
+                get_metadata.return_value['email']
             ],
             http_request=None
         )
@@ -125,29 +128,50 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
     def test_project_id(self, get_metadata):
         credentials = AppAssertionCredentials()
         self.assertIsNone(credentials._project_id)
-        self.assertEquals(credentials.project_id, 'a-project-id')
-        self.assertEquals(credentials.project_id, 'a-project-id')
+        self.assertEqual(credentials.project_id, 'a-project-id')
+        self.assertEqual(credentials.project_id, 'a-project-id')
         get_metadata.assert_called_once_with(
             path=[
                 'project',
                 'project-id'
             ],
-            recursive=False,
-            returns_json=False
+            recursive=False
         )
 
-    def test_refresh_token(self):
+    @mock.patch(METADATA_SERVER, return_value=FOREVER_TOKEN)
+    def test_refresh_token(self, get_metadata):
         credentials = AppAssertionCredentials()
-        self.assertEquals(None, credentials.access_token)
+        self.assertIsNone(credentials.access_token)
 
-        with mock.patch(METADATA_SERVER, return_value=ONE_SECOND_TOKEN):
+        with mock.patch('oauth2client.contrib.gce._NOW',
+                        side_effect=[
+                            datetime.min,
+                            datetime.max
+                        ]):
             credentials.get_access_token()
-            time.sleep(2)
             self.assertTrue(credentials.access_token_expired)
 
-        with mock.patch(METADATA_SERVER, return_value=FOREVER_TOKEN):
+        with mock.patch('oauth2client.contrib.gce._NOW',
+                        side_effect=[
+                            datetime.max - timedelta(
+                                seconds=get_metadata.return_value['expires_in']
+                            ),  # Force refresh
+                            datetime.min,
+                            datetime.min
+                        ]):
             credentials.get_access_token()
             self.assertFalse(credentials.access_token_expired)
+
+    @mock.patch('warnings.warn')
+    @mock.patch(METADATA_SERVER, return_value=A_SERVICE_ACCOUNT)
+    def test_create_scoped_valid(self, get_metadata, warn_mock):
+        scope = 'https://www.googleapis.com/auth/cloud-platform'
+        credentials = AppAssertionCredentials()
+        credentials.create_scoped(scope)
+        warn_mock.assert_called_once_with(_SCOPES_WARNING)
+
+
+class TestAppAssertionCredentialsSerializeDeserialize(unittest2.TestCase):
 
     @mock.patch(METADATA_SERVER, return_value=A_SERVICE_ACCOUNT)
     def test_serialize_deserialize(self, get_metadata):
@@ -155,7 +179,7 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         credentials_from_json = Credentials.new_from_json(
             credentials.to_json()
         )
-        self.assertTrue(
+        self.assertEqual(
             credentials.service_account_info,
             credentials_from_json.service_account_info
         )
@@ -227,7 +251,8 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
     def test_save_to_well_known_file(self, get_metadata):
         with tempfile.NamedTemporaryFile() as f:
             credentials = AppAssertionCredentials()
-            save_to_well_known_file(credentials, well_known_file=f.name)
+            save_to_well_known_file(credentials, well_known_file=temp.name)
+            self.assertIsNotNone(temp.read())
 
     # ERROR TESTS
 
@@ -235,11 +260,14 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         http = mock.MagicMock()
         content = '{BADJSON'
         http.request = mock.MagicMock(
-            return_value=(mock.Mock(status=http_client.OK), content))
+            return_value=(httplib2.Response({
+                'status': http_client.OK,
+                'content-type': 'application/json'
+            }), content))
 
         credentials = AppAssertionCredentials()
         self.assertRaises(
-            HttpAccessTokenRefreshError,
+            ValueError,
             credentials.refresh,
             http
         )
@@ -252,28 +280,8 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         )
 
         credentials = AppAssertionCredentials()
-        exception_caught = None
-        try:
+        with self.assertRaises(HttpAccessTokenRefreshError):
             credentials.refresh(http)
-        except HttpAccessTokenRefreshError as exc:
-            exception_caught = exc
-
-        self.assertNotEqual(exception_caught, None)
-
-    def test_refresh_failure_404(self):
-        http = mock.MagicMock()
-        content = '{}'
-        http.request = mock.MagicMock(
-            return_value=(mock.Mock(status=http_client.NOT_FOUND), content))
-
-        credentials = AppAssertionCredentials()
-        exception_caught = None
-        try:
-            credentials.refresh(http)
-        except HttpAccessTokenRefreshError as exc:
-            exception_caught = exc
-
-        self.assertNotEqual(exception_caught, None)
 
     def test_scopes_failure(self):
         # Set-up the mock.
@@ -284,15 +292,10 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         # Test the failure.
         credentials = AppAssertionCredentials()
 
-        error = None
-        try:
+        with self.assertRaises(MetadataServerHttpError):
             credentials._retrieve_scopes(http.request)
-        except ValueError as e:
-            error = e
 
-        self.assertIsNotNone(error)
-
-        self.assertEquals(
+        self.assertEqual(
             credentials._service_account_info['email'],
             'default'
         )
@@ -307,7 +310,8 @@ class Test__get_metadata(unittest2.TestCase):
         http_request = mock.MagicMock()
         data = json.dumps(A_SERVICE_ACCOUNT).encode('utf-8')
         http_request.return_value = (
-            httplib2.Response({'status': http_client.OK}), data)
+            httplib2.Response({'status': http_client.OK,
+                               'content-type': 'application/json'}), data)
         result = _get_metadata(http_request)
         self.assertEqual(result, json.loads(data.decode('utf-8')))
         http_request.assert_called_once_with(
@@ -319,15 +323,23 @@ class Test__get_metadata(unittest2.TestCase):
         response = httplib2.Response({'status': http_client.NOT_FOUND})
         content = b'Not found'
         http_request.return_value = (response, content)
-        error = None
-        try:
+        with self.assertRaises(MetadataServerHttpError):
             _get_metadata(http_request)
-        except ValueError as e:
-            error = e
 
-        self.assertIsNotNone(error)
         http_request.assert_called_once_with(
             _METADATA_ROOT + '/?recursive=true',
+            headers={'Metadata-Flavor': 'Google'})
+
+    def test_success_not_json(self):
+        http_request = mock.MagicMock()
+        data = '12345'.encode('utf-8')
+        http_request.return_value = (
+            httplib2.Response({'status': http_client.OK,
+                               'content-type': 'text/plain'}), data)
+        result = _get_metadata(http_request, recursive=False)
+        self.assertEqual(result, data.decode('utf-8'))
+        http_request.assert_called_once_with(
+            _METADATA_ROOT,
             headers={'Metadata-Flavor': 'Google'})
 
 
