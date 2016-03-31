@@ -20,6 +20,7 @@ class IAMSigner:
 
     def __init__(self, project_id, service_account_email, http):
         """Constructor for IAMSigner.
+
         Args:
             project_id:
                 the project id for the project that owns the specified service
@@ -47,6 +48,9 @@ class IAMSigner:
     def from_credentials(cls, credentials, http=None):
         """Convenience method, constructs an IAMSigner from credentials.
 
+        This method assumes `project_id` and `service_account_email` as
+        properties on your credentials. It also checks that your credentials
+        have sufficient scopes to access the IAM API.
         """
         if not set(credentials.scopes) & IAM_SCOPES:
             raise ValueError(
@@ -61,6 +65,7 @@ class IAMSigner:
 
     def sign_blob(self, blob):
         """Signs a blob with the Google Cloud IAM API.
+
         See: https://cloud.google.com/iam/reference/rest/v1/
         """
         response, content = self._http.request(

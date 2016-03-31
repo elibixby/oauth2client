@@ -21,8 +21,8 @@ import json
 
 import httplib2
 from oauth2client.contrib.gce import AppAssertionCredentials
-from oauth2client.contrib.iam_signer import IAMSigner,\
-    IAM_SIGN_BLOB_ENDPOINT
+from oauth2client.contrib.iam_signer import IAMSigner
+from oauth2client.contrib.iam_signer import IAM_SIGN_BLOB_ENDPOINT
 
 __author__ = 'elibixby@google.com (Eli Bixby)'
 
@@ -64,12 +64,18 @@ class IAMSignerTests(unittest2.TestCase):
             )
         )
 
-    def test_from_credentials(self):
-        with mock.patch(METADATA_SERVER,
-                        side_effect=[VALID_SERVICE_ACCOUNT,
-                                     'a-project-id']) as m:
-            IAMSigner.from_credentials(AppAssertionCredentials())
-            m.assert_has_calls([
+    @mock.patch(METADATA_SERVER, side_effect=[
+        VALID_SERVICE_ACCOUNT, 'a-project-id'])
+    def test_from_credentials(self, get_metadata):
+        with mock.patch('httplib2.Http',
+                        return_value=_http_mock(
+                            http_client.OK, dict()
+                        )) as http:
+
+            credentials = IAMSigner.from_credentials(
+                AppAssertionCredentials()
+            )
+            get_metadata.assert_has_calls([
                 mock.call(
                     path=[
                         'instance',
@@ -86,11 +92,13 @@ class IAMSignerTests(unittest2.TestCase):
                     recursive=False
                 )
             ])
+            # Assert that the http client has been replaced with
+            # the authentication proxy
+            self.assertNotEqual(credentials._http.request, http.request)
 
     @mock.patch(METADATA_SERVER, return_value=INVALID_SERVICE_ACCOUNT)
     def test_from_credentials_bad_scopes(self, m):
-        error = None
-        try:
+        with self.assertRaises(ValueError):
             IAMSigner.from_credentials(AppAssertionCredentials())
             m.assert_called_once_with(
                 path=[
@@ -100,9 +108,6 @@ class IAMSignerTests(unittest2.TestCase):
                 ],
                 http_request=None
             )
-        except ValueError as e:
-            error = e
-        self.assertIsNotNone(error)
 
     def test_sign_blob_success(self):
         http = _http_mock(
@@ -124,11 +129,8 @@ class IAMSignerTests(unittest2.TestCase):
     def test_sign_blob_failure(self):
         http = _http_mock(http_client.NOT_FOUND, {})
         signer = IAMSigner('a-project-id', 'a@example.com', http)
-        error = None
-        try:
+        with self.assertRaises(ValueError):
             signer.sign_blob(b'1234')
-        except ValueError as e:
-            error = e
         http.request.assert_called_once_with(
             IAM_SIGN_BLOB_ENDPOINT.format(
                 project_id='a-project-id',
@@ -137,7 +139,6 @@ class IAMSignerTests(unittest2.TestCase):
             method='POST',
             body=json.dumps({'bytesToSign': b'1234'})
         )
-        self.assertIsNotNone(error)
 
 
 if __name__ == '__main__':  # pragma: NO COVER
