@@ -14,14 +14,14 @@
 
 """Unit tests for oauth2client.contrib.gce."""
 import json
+import tempfile
+import unittest2
+import mock
 from datetime import datetime
 from datetime import timedelta
 
-from six.moves import http_client
-import unittest2
-import mock
-
 import httplib2
+from six.moves import http_client
 from oauth2client.client import HttpAccessTokenRefreshError
 from oauth2client.client import Credentials
 from oauth2client.client import save_to_well_known_file
@@ -30,7 +30,6 @@ from oauth2client.contrib.gce import _METADATA_ROOT
 from oauth2client.contrib.gce import _get_metadata
 from oauth2client.contrib.gce import AppAssertionCredentials
 from oauth2client.contrib.gce import MetadataServerHttpError
-import tempfile
 
 
 __author__ = 'jcgregorio@google.com (Joe Gregorio)'

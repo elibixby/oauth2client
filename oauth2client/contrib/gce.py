@@ -20,9 +20,9 @@ Utilities for making it easier to use OAuth 2.0 on Google Compute Engine.
 import json
 import logging
 import warnings
+import datetime
 
 import httplib2
-import datetime
 from six.moves import http_client
 
 from oauth2client._helpers import _from_bytes
