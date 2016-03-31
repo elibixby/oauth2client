@@ -196,8 +196,7 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
                             'project',
                             'project-id'
                         ],
-                        recursive=False,
-                        returns_json=False
+                        recursive=False
                     ),
                     mock.call(
                         path=[
