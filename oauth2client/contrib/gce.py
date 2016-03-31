@@ -27,7 +27,6 @@ from six.moves import http_client
 from oauth2client.client import HttpAccessTokenRefreshError
 from oauth2client.client import AssertionCredentials
 from oauth2client._helpers import _from_bytes
-from oauth2client.contrib.iam_signer import IAMSigner
 
 __author__ = 'jcgregorio@google.com (Joe Gregorio)'
 
