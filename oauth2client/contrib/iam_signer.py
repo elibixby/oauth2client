@@ -15,6 +15,15 @@ IAM_SCOPES = set([
     'https://www.googleapis.com/auth/cloud-platform'
 ])
 
+FORBIDDEN_ERROR = (
+    'The credentials do not have permission to sign blobs on behalf '
+    'of service account {service_account_email}. Go to '
+    'https://console.cloud.google.com/permissions/serviceaccounts'
+    '?project={project_id} and add your credentials as a '
+    '\"Service Account Actor\" to {service_account_email} to enable IAM blob '
+    'signing. The server response is: {response}'
+)
+
 
 class IAMSigner:
 
@@ -42,6 +51,8 @@ class IAMSigner:
             project_id=project_id,
             service_account_email=service_account_email
         )
+        self._project_id = project_id
+        self._service_account_email = service_account_email
         self._http = http
 
     @classmethod
@@ -77,5 +88,11 @@ class IAMSigner:
         if response.status == http_client.OK:
             d = json.loads(_from_bytes(content))
             return d['keyId'], d['signature']
+        if response.status == http_client.FORBIDDEN:
+            raise ValueError(FORBIDDEN_ERROR.format(
+                project_id=self._project_id,
+                service_account_email=self._service_account_email,
+                response=str(response)
+            ))
         else:
             raise ValueError(str(response))
