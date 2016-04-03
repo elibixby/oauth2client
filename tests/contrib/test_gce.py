@@ -13,15 +13,14 @@
 # limitations under the License.
 
 """Unit tests for oauth2client.contrib.gce."""
+
+import datetime
 import json
+import mock
 import tempfile
 import unittest2
-import mock
-from datetime import datetime
-from datetime import timedelta
 
 import httplib2
-from six.moves import http_client
 from oauth2client.client import HttpAccessTokenRefreshError
 from oauth2client.client import Credentials
 from oauth2client.client import save_to_well_known_file
@@ -146,19 +145,19 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
 
         with mock.patch('oauth2client.contrib.gce._NOW',
                         side_effect=[
-                            datetime.min,
-                            datetime.max
+                            datetime.datetime.min,
+                            datetime.datetime.max
                         ]):
             credentials.get_access_token()
             self.assertTrue(credentials.access_token_expired)
 
         with mock.patch('oauth2client.contrib.gce._NOW',
                         side_effect=[
-                            datetime.max - timedelta(
+                            datetime.datetime.max - datetime.timedelta(
                                 seconds=get_metadata.return_value['expires_in']
                             ),  # Force refresh
-                            datetime.min,
-                            datetime.min
+                            datetime.datetime.min,
+                            datetime.datetime.min
                         ]):
             credentials.get_access_token()
             self.assertFalse(credentials.access_token_expired)
