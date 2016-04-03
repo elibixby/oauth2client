@@ -35,17 +35,17 @@ logger = logging.getLogger(__name__)
 # URI Template for the endpoint that returns access_tokens.
 _METADATA_ROOT = 'http://metadata.google.internal/computeMetadata/v1/'
 _SCOPES_WARNING = """\
-You have requested explicit scopes to be used with a GCE service account.
-These scopes *are* present on the credentials; but this argument will have
+You have requested explicit scopes to be used with a GCE service account, and
+these scopes *are* present on the credentials. However, this request will have
 no effect on the actual scopes for tokens requested. The credentials scopes
 are set at VM instance creation time and can't be overridden in the request.
-To learn more go to: https://cloud.google.com/compute/docs/authentication
+To learn more go to https://cloud.google.com/compute/docs/authentication .
 """
 _SCOPES_ERROR = """\
 You have requested explicit scopes to be used with a GCE service account
 which are not available on the credentials. The scopes are set at VM instance
 creation time and can't be overridden in the request.
-To learn more go to: https://cloud.google.com/compute/docs/authentication
+To learn more go to https://cloud.google.com/compute/docs/authentication .
 """
 _NOW = datetime.datetime.now
 
@@ -62,13 +62,14 @@ def _get_metadata(http_request=None, path=None, recursive=True):
             with which to make the call to the metadata server
         path: a list of strings denoting the metadata server request
             path.
+        recursive: if true, returns a json blob of the entire tree below
+            this level. If false, return a list of child keys.
 
     Returns:
         A deserialized JSON object representing the data returned
         from the metadata server
     """
-
-    if not path:
+    if path is None:
         path = []
 
     if not http_request:
@@ -103,7 +104,10 @@ def _get_access_token(http_request, email):
         email: The service account email to request an access token with
 
     Returns:
-        A tuple (accessToken, token expiry)
+        A tuple (access_token, token_expiry). access_token is a string which
+            can be used as a bearer token to authenticate requests.
+            token_expiry is a datetime.datetime representing the expiry time
+            of access_token.
     """
     try:
         token_json = _get_metadata(
@@ -166,6 +170,13 @@ class AppAssertionCredentials(AssertionCredentials):
                 provided and will override the ``service_account_email``
                 argument.
         """
+        # Assertion type is no longer used, but still in the
+        # parent class signature.
+        super(AppAssertionCredentials, self).__init__(
+            None,
+            scopes=scope,
+            **unused_kwargs
+        )
 
         self._service_account_info = service_account_info or {
             'email': service_account_email
@@ -178,14 +189,6 @@ class AppAssertionCredentials(AssertionCredentials):
         # This function call must be made because AssertionCredentials
         # will not pass the scopes kwarg to parent class
         self._check_scopes_and_notify(scope)
-
-        # Assertion type is no longer used, but still in the
-        # parent class signature.
-        super(AppAssertionCredentials, self).__init__(
-            None,
-            scopes=scope,
-            **unused_kwargs
-        )
 
     @property
     def service_account_info(self):
@@ -258,8 +261,7 @@ class AppAssertionCredentials(AssertionCredentials):
 
     def _retrieve_scopes(self, http_request):
         return self._get_service_account_info(
-            http_request=http_request
-        )['scopes']
+            http_request=http_request)['scopes']
 
     def _refresh(self, http_request):
         """Refreshes the access_token.
@@ -275,9 +277,7 @@ class AppAssertionCredentials(AssertionCredentials):
             HttpAccessTokenRefreshError: When the refresh fails.
         """
         self.access_token, self.token_expiry = _get_access_token(
-            http_request,
-            self._service_account_info['email']
-        )
+            http_request, self._service_account_info['email'])
 
     def create_scoped(self, scopes):
         # Trigger warning or error based on scopes
