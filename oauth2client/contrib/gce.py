@@ -26,7 +26,8 @@ from six.moves import http_client
 
 from oauth2client.client import HttpAccessTokenRefreshError
 from oauth2client.client import AssertionCredentials
-from oauth2client.contrib.iam_signer import IAMSigner
+from oauth2client.contrib.iam import Iam
+from oauth2client.util import _from_bytes
 
 __author__ = 'jcgregorio@google.com (Joe Gregorio)'
 
@@ -146,6 +147,8 @@ class AppAssertionCredentials(AssertionCredentials):
                  scope=None,
                  service_account_email='default',
                  service_account_info=None,
+                 signing_credentials=None,
+                 signing_client=None,
                  **unused_kwargs):
         """Constructor for AppAssertionCredentials
 
@@ -183,7 +186,10 @@ class AppAssertionCredentials(AssertionCredentials):
         }
         self._project_id = None
         self._partial = service_account_info is None
-        self._iam_signer = None
+
+        self._signing_credentials = signing_credentials
+        self._signing_client = signing_client
+        self._iam = None
 
         self.kwargs = unused_kwargs
 
@@ -301,5 +307,8 @@ class AppAssertionCredentials(AssertionCredentials):
 
     def sign_blob(self, blob):
         if not self._iam_signer:
-            self._iam_signer = IAMSigner.from_credentials(self)
-        return self._iam_signer.sign_blob(blob)
+            self._iam = Iam(
+                self._signing_credentials or self,
+                http=self.signing_client
+            )
+        return self._iam.sign_blob(self.project_id, self.service_account_email, blob)
