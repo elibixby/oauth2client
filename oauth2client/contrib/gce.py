@@ -112,20 +112,16 @@ def _get_access_token(http_request, email):
     try:
         token_json = _get_metadata(
             http_request=http_request,
-            path=[
-                'instance',
-                'service-accounts',
-                email,
-                'token'
-            ],
-            recursive=False
-        )
+            path=['instance',
+                  'service-accounts',
+                  email,
+                  'token'],
+            recursive=False)
     except MetadataServerHttpError as failed_fetch:
         raise HttpAccessTokenRefreshError(str(failed_fetch))
 
     token_expiry = _NOW() + datetime.timedelta(
-        seconds=token_json['expires_in']
-    )
+        seconds=token_json['expires_in'])
     return token_json['access_token'], token_expiry
 
 
@@ -144,9 +140,8 @@ class AppAssertionCredentials(AssertionCredentials):
 
     def __init__(self,
                  scope=None,
-                 service_account_email='default',
-                 service_account_info=None,
-                 **unused_kwargs):
+                 service_account_email=None,
+                 **kwargs):
         """Constructor for AppAssertionCredentials
 
         Args:
@@ -160,31 +155,20 @@ class AppAssertionCredentials(AssertionCredentials):
                 service accounts, or left blank to use the default service
                 account for the instance. The default service account is
                 usually the shared Compute Engine service account.
-            service_account_info:
-                (Optional) Dictionary containing information about a
-                service account (typically deserialized from JSON).
-                If passed in, will be used as ``service_account_info``
-                property. Otherwise, the Compute Engine metadata server
-                will be used to determine this value. Additionally,
-                if present the 'email' field in this argument must be
-                provided and will override the ``service_account_email``
-                argument.
         """
         # Assertion type is no longer used, but still in the
         # parent class signature.
         super(AppAssertionCredentials, self).__init__(
-            None,
-            scopes=scope,
-            **unused_kwargs
-        )
+            None, scopes=scope, **kwargs)
 
-        self._service_account_info = service_account_info or {
-            'email': service_account_email
-        }
+        self._service_account_info = {}
+        if service_account_email:
+            self._service_account_info['email'] = service_account_email
+
         self._project_id = None
-        self._partial = service_account_info is None
+        self._partial = True
 
-        self.kwargs = unused_kwargs
+        self.kwargs = kwargs
 
         # This function call must be made because AssertionCredentials
         # will not pass the scopes kwarg to parent class
@@ -216,9 +200,7 @@ class AppAssertionCredentials(AssertionCredentials):
     def project_id(self):
         if not self._project_id:
             self._project_id = _get_metadata(
-                path=['project', 'project-id'],
-                recursive=False
-            )
+                path=['project', 'project-id'], recursive=False)
         return self._project_id
 
     @property
@@ -249,13 +231,10 @@ class AppAssertionCredentials(AssertionCredentials):
         """
         if self._partial:
             self._service_account_info = _get_metadata(
-                path=[
-                    'instance',
-                    'service-accounts',
-                    self._service_account_info['email'],
-                ],
-                http_request=http_request
-            )
+                path=['instance',
+                      'service-accounts',
+                      self._service_account_info.get('email', 'default')],
+                http_request=http_request)
             self._partial = False
         return self._service_account_info
 
@@ -277,7 +256,8 @@ class AppAssertionCredentials(AssertionCredentials):
             HttpAccessTokenRefreshError: When the refresh fails.
         """
         self.access_token, self.token_expiry = _get_access_token(
-            http_request, self._service_account_info['email'])
+            http_request,
+            self._service_account_info.get('email', 'default'))
 
     def create_scoped(self, scopes):
         # Trigger warning or error based on scopes
@@ -303,13 +283,12 @@ class AppAssertionCredentials(AssertionCredentials):
 
     def to_json(self):
         return self._to_json(
-            self.NON_SERIALIZED_MEMBERS,
-            to_serialize=self.serialization_data
-        )
+            self.NON_SERIALIZED_MEMBERS, to_serialize=self.serialization_data)
 
     @classmethod
     def from_json(cls, json_data):
         data = json.loads(json_data)
-        return AppAssertionCredentials(
-            service_account_info=data['service_account_info']
-        )
+        creds = cls()
+        creds._service_account_info = data['service_account_info']
+        creds._partial = False
+        return creds
