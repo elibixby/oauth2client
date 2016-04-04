@@ -16,6 +16,7 @@
 
 Utilities for making it easier to use OAuth 2.0 on Google Compute Engine.
 """
+
 import datetime
 import json
 import logging
@@ -35,9 +36,10 @@ logger = logging.getLogger(__name__)
 # URI Template for the endpoint that returns access_tokens.
 _METADATA_ROOT = 'http://metadata.google.internal/computeMetadata/v1/'
 _SCOPES_WARNING = """\
-You have requested explicit scopes to be used with a GCE service account, and
-these scopes *are* present on the credentials. However, this request will have
-no effect on the actual scopes for tokens requested. The credentials scopes
+You have requested explicit scopes to be used with a GCE service account
+credentials, and these scopes *are* present on the credentials.
+However, setting scopes on the GCE service account credentials has no effect
+on the actual scopes for tokens requested. The credentials scopes
 are set at VM instance creation time and can't be overridden in the request.
 To learn more go to https://cloud.google.com/compute/docs/authentication .
 """
