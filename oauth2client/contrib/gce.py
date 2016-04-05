@@ -35,8 +35,10 @@ logger = logging.getLogger(__name__)
 
 # URI Template for the endpoint that returns access_tokens.
 _METADATA_ROOT = 'http://metadata.google.internal/computeMetadata/v1/'
+# Backwards Compat
+META = _METADATA_ROOT + '/instance/service-accounts/default/token'
 _SCOPES_WARNING = """\
-You have requested explicit scopes to be used with a GCE service account
+You have specified explicit scopes to be used with a GCE service account
 credentials, and these scopes *are* present on the credentials.
 However, setting scopes on the GCE service account credentials has no effect
 on the actual scopes for tokens requested. The credentials scopes
@@ -44,7 +46,7 @@ are set at VM instance creation time and can't be overridden in the request.
 To learn more go to https://cloud.google.com/compute/docs/authentication .
 """
 _SCOPES_ERROR = """\
-You have requested explicit scopes to be used with a GCE service account
+You have specified explicit scopes to be used with a GCE service account
 which are not available on the credentials. The scopes are set at VM instance
 creation time and can't be overridden in the request.
 To learn more go to https://cloud.google.com/compute/docs/authentication .
@@ -175,6 +177,7 @@ class AppAssertionCredentials(AssertionCredentials):
 
         # This function call must be made because AssertionCredentials
         # will not pass the scopes kwarg to parent class
+        # In a breaking version change, remove the scope kwarg
         self._check_scopes_and_notify(scope)
 
     @property
@@ -263,8 +266,7 @@ class AppAssertionCredentials(AssertionCredentials):
             self._service_account_info.get('email', 'default'))
 
     def create_scoped(self, scopes):
-        # Trigger warning or error based on scopes
-        self.scopes = scopes
+        self._check_scopes_and_notify(scopes)
         # No need for new object creation
         return self
 
