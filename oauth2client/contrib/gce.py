@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # URI Template for the endpoint that returns access_tokens.
 _METADATA_ROOT = 'http://metadata.google.internal/computeMetadata/v1/'
 # Backwards Compat
-META = _METADATA_ROOT + '/instance/service-accounts/default/token'
+META = _METADATA_ROOT + 'instance/service-accounts/default/token'
 _SCOPES_WARNING = """\
 You have specified explicit scopes to be used with a GCE service account
 credentials, and these scopes *are* present on the credentials.
