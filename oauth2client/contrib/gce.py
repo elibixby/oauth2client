@@ -163,9 +163,10 @@ class AppAssertionCredentials(AssertionCredentials):
         super(AppAssertionCredentials, self).__init__(
             None, scopes=scope, **kwargs)
 
-        self._service_account_info = {}
-        if service_account_email:
-            self._service_account_info['email'] = service_account_email
+        if service_account_email is None:
+            self._service_account_info = {}
+        else:
+            self._service_account_info = {'email': service_account_email}
 
         self._project_id = None
         self._partial = True
