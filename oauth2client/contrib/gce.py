@@ -129,6 +129,11 @@ def _get_access_token(http_request, email):
     return token_json['access_token'], token_expiry
 
 
+def get_project_id():
+    return _get_metadata(
+        path=['project', 'project-id'], recursive=False)
+
+
 class AppAssertionCredentials(AssertionCredentials):
     """Credentials object for Compute Engine Assertion Grants
 
@@ -201,13 +206,6 @@ class AppAssertionCredentials(AssertionCredentials):
     @property
     def service_account_email(self):
         return self.service_account_info['email']
-
-    @property
-    def project_id(self):
-        if not self._project_id:
-            self._project_id = _get_metadata(
-                path=['project', 'project-id'], recursive=False)
-        return self._project_id
 
     @property
     def serialization_data(self):

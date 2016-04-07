@@ -29,6 +29,7 @@ from oauth2client.contrib.gce import _METADATA_ROOT
 from oauth2client.contrib.gce import _get_metadata
 from oauth2client.contrib.gce import AppAssertionCredentials
 from oauth2client.contrib.gce import MetadataServerHttpError
+from oauth2client.contrib.gce import get_project_id
 from six.moves import http_client
 
 
@@ -104,15 +105,6 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
                   'service-accounts',
                   get_metadata.return_value['email']],
             http_request=None)
-
-    @mock.patch(METADATA_SERVER, return_value='a-project-id')
-    def test_project_id(self, get_metadata):
-        credentials = AppAssertionCredentials()
-        self.assertIsNone(credentials._project_id)
-        self.assertEqual(credentials.project_id, 'a-project-id')
-        self.assertEqual(credentials.project_id, 'a-project-id')
-        get_metadata.assert_called_once_with(
-            path=['project', 'project-id'], recursive=False)
 
     @mock.patch(METADATA_SERVER, return_value=FOREVER_TOKEN)
     def test_refresh_token(self, get_metadata):
@@ -232,6 +224,13 @@ class Test__get_metadata(unittest2.TestCase):
         http_request.assert_called_once_with(
             _METADATA_ROOT + '/?recursive=true',
             headers={'Metadata-Flavor': 'Google'})
+
+    @mock.patch(METADATA_SERVER, return_value='a-project-id')
+    def test_project_id(self, get_metadata):
+        project_id = get_project_id()
+        self.assertEqual(project_id, 'a-project-id')
+        get_metadata.assert_called_once_with(
+            path=['project', 'project-id'], recursive=False)
 
     def test_success_not_json(self):
         http_request = mock.MagicMock()
