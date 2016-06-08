@@ -57,10 +57,10 @@ def get(path, recursive=True, http_request=None, root=METADATA_ROOT):
 def get_service_account_info(service_account='default', http_request=None):
     """ Get information about a service account from the metadata server.
     :param service_account: a service account email. Left blank information for
-        the default service account of current compute engine instance will be looked up.
+    the default service account of current compute engine instance will be looked up.
     :param http_request: callable, a callable that matches the method
-        signature of httplib2.Http.request, used to make
-        the refresh request.
+    signature of httplib2.Http.request, used to make
+    the refresh request.
     :return: A dictionary with information about the specified service account.
     """
     return get(
@@ -73,10 +73,10 @@ def get_service_account_info(service_account='default', http_request=None):
 def get_token(service_account='default', http_request=None):
     """Fetch an OAuth access token from the metadata server
     :param service_account: a service account email. Left blank information for
-        the default service account of current compute engine instance will be looked up.
+    the default service account of current compute engine instance will be looked up.
     :param http_request: callable, a callable that matches the method
-        signature of httplib2.Http.request, used to make
-        the refresh request.
+    signature of httplib2.Http.request, used to make
+    the refresh request.
     :return:
     """
     try:
