@@ -56,8 +56,8 @@ class AppAssertionCredentials(AssertionCredentials):
     information to generate and refresh its own access tokens.
     """
 
-    NON_SERIALIZED_MEMBERS = AssertionCredentials.NON_SERIALIZED_MEMBERS.extend(
-        ['_metadata', 'kwargs'])
+    NON_SERIALIZED_MEMBERS = frozenset(
+        AssertionCredentials.NON_SERIALIZED_MEMBERS | set(['_metadata', 'kwargs']))
 
     @util.positional(2)
     def __init__(self, scope='', metadata_server=None, **kwargs):
