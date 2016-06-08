@@ -26,9 +26,27 @@ requests. Fork the repository, and make your changes in the forked repository.
 Include tests
 -------------
 
-Be sure to add the relevant tests before making the pull request. Docs will be
-updated automatically when we merge to `master`, but you should also build
-the docs yourself via `tox -e docs` and make sure they're readable.
+Be sure to add the relevant tests before making the pull request.
+
+Update Docs
+-----------
+
+Tests will fail if the documented surface changes and the appropriate docs
+changes aren't checked in. To update docs, do the following from your repositories
+root directory
+(you will likely want to use a virtualenv)
+
+```
+cd docs
+pip install -r requirements.txt
+pip install sphinx
+make html
+git add .
+git commit .
+```
+
+You can then verify that you have updated the docs correctly by running
+`tox -e docs`
 
 Make the pull request
 ---------------------
