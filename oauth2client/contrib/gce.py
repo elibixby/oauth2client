@@ -25,7 +25,7 @@ import warnings
 from oauth2client._helpers import _from_bytes
 from oauth2client import util
 from oauth2client.client import AssertionCredentials
-from oauth2client.contrib.metadata import MetadataServer
+from oauth2client.contrib import metadata
 
 
 __author__ = 'jcgregorio@google.com (Joe Gregorio)'
@@ -56,11 +56,8 @@ class AppAssertionCredentials(AssertionCredentials):
     information to generate and refresh its own access tokens.
     """
 
-    NON_SERIALIZED_MEMBERS = frozenset(
-        AssertionCredentials.NON_SERIALIZED_MEMBERS | set(['_metadata', 'kwargs']))
-
     @util.positional(2)
-    def __init__(self, scope='', metadata_server=None, **kwargs):
+    def __init__(self, scope='', **kwargs):
         """Constructor for AppAssertionCredentials
 
         Args:
@@ -76,11 +73,12 @@ class AppAssertionCredentials(AssertionCredentials):
         self.scope = util.scopes_to_string(scope)
         self.kwargs = kwargs
 
-        self._metadata = metadata_server or MetadataServer()
-
         # Assertion type is no longer used, but still in the
         # parent class signature.
         super(AppAssertionCredentials, self).__init__(None)
+
+        # Cache until Metadata Server supports Cache-Control Header
+        self._service_account_email = None
 
     @classmethod
     def from_json(cls, json_data):
@@ -100,7 +98,7 @@ class AppAssertionCredentials(AssertionCredentials):
         Raises:
             HttpAccessTokenRefreshError: When the refresh fails.
         """
-        self.access_token, self.token_expiry = self._metadata.get_token(
+        self.access_token, self.token_expiry = metadata.get_token(
             http_request=http_request)
 
     @property
@@ -145,4 +143,6 @@ class AppAssertionCredentials(AssertionCredentials):
             AttributeError, if the email can not be retrieved from the Google
             Compute Engine metadata service.
         """
-        return self._metadata.get_service_account_info()['email']
+        if self._service_account_email is None:
+            self._service_account_email = metadata.get_service_account_info()['email']
+        return self._service_account_email
