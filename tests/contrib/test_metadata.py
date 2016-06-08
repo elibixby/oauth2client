@@ -27,7 +27,7 @@ from oauth2client.contrib import metadata
 PATH = ['a', 'b']
 DATA = {'foo': 'bar'}
 EXPECTED_ARGS = ['http://metadata.google.internal/computeMetadata/v1/a/b/?recursive=true']
-EXPECTED_KWARGS = metadata.METADATA_HEADERS
+EXPECTED_KWARGS = dict(headers=metadata.METADATA_HEADERS)
 
 
 def request_mock(status, content_type, content):
@@ -48,8 +48,7 @@ class TestMetadata(unittest2.TestCase):
             metadata.get(PATH, http_request=http_request),
             DATA
         )
-        http_request.assert_called_once_with(
-            )
+        http_request.assert_called_once_with(*EXPECTED_ARGS, **EXPECTED_KWARGS)
 
     def test_get_success_string(self):
         http_request = request_mock(
@@ -68,10 +67,10 @@ class TestMetadata(unittest2.TestCase):
 
         http_request.assert_called_once_with(*EXPECTED_ARGS, **EXPECTED_KWARGS)
 
-    @mock.patch('oauth2client.client._UTCNOW', return_value=datetime.datetime.min)
+    @mock.patch('oauth2client.contrib.metadata._UTCNOW', return_value=datetime.datetime.min)
     def test_get_token_success(self, now):
         http_request = request_mock(
-            http_client.NOT_FOUND,
+            http_client.OK,
             'application/json',
             json.dumps({'access_token': 'a', 'expires_in': 100})
         )

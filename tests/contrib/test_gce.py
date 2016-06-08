@@ -54,8 +54,8 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
                          credentials_from_json.access_token)
 
     @mock.patch('oauth2client.contrib.metadata.get_token',
-                return_value=mock.Mock(
-                    side_effect=[('A', 0), ('B', datetime.datetime.max)]))
+                side_effect=[('A', datetime.datetime.min),
+                             ('B', datetime.datetime.max)])
     def test_refresh_token(self, metadata):
         credentials = AppAssertionCredentials()
         self.assertIsNone(credentials.access_token)
@@ -96,8 +96,7 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
             credentials.sign_blob(b'blob')
 
     @mock.patch('oauth2client.contrib.metadata.get_service_account_info',
-                return_value=mock.MagicMock(
-                    return_value={'email': 'a@example.com'}))
+                return_value={'email': 'a@example.com'})
     def test_service_account_email(self, metadata):
         credentials = AppAssertionCredentials()
         # Assert that service account isn't pre-fetched
