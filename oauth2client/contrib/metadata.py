@@ -142,5 +142,3 @@ class MetadataServer:
         token_expiry = _UTCNOW() + datetime.timedelta(
             seconds=token_json['expires_in'])
         return token_json['access_token'], token_expiry
-
-

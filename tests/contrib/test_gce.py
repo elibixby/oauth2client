@@ -53,7 +53,7 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         self.assertEqual(credentials.access_token,
                          credentials_from_json.access_token)
 
-    @mock.patch('oauth2client.contrib.metadata.Metadata',
+    @mock.patch('oauth2client.contrib.metadata.MetadataServer',
                 return_value=mock.MagicMock(
                     get_access_token=mock.Mock(
                         side_effect=[('A', 0), ('B', datetime.datetime.max)])))
@@ -96,7 +96,7 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         with self.assertRaises(NotImplementedError):
             credentials.sign_blob(b'blob')
 
-    @mock.patch('oauth2client.contrib.metadata.Metadata',
+    @mock.patch('oauth2client.contrib.metadata.MetadataServer',
                 return_value=mock.MagicMock(
                     get_service_account_info=mock.MagicMock(
                         return_value={'email': 'a@example.com'})))

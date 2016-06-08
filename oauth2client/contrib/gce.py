@@ -21,6 +21,7 @@ import json
 import logging
 import warnings
 
+
 from oauth2client._helpers import _from_bytes
 from oauth2client import util
 from oauth2client.client import AssertionCredentials
@@ -54,6 +55,9 @@ class AppAssertionCredentials(AssertionCredentials):
     represents a two legged flow, and therefore has all of the required
     information to generate and refresh its own access tokens.
     """
+
+    NON_SERIALIZED_MEMBERS = AssertionCredentials.NON_SERIALIZED_MEMBERS.extend(
+        ['_metadata', 'kwargs'])
 
     @util.positional(2)
     def __init__(self, scope='', metadata_server=None, **kwargs):
