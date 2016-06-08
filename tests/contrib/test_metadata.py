@@ -32,21 +32,27 @@ EXPECTED_KWARGS = metadata.METADATA_HEADERS
 
 def get_json_request_mock():
     return mock.MagicMock(return_value=(
-        {'status': http_client.OK, 'content-type': 'application/json'},
+        httplib2.Response(
+            {'status': http_client.OK, 'content-type': 'application/json'}
+        ),
         json.dumps(DATA).encode('utf-8')
     ))
 
 
 def get_string_request_mock():
     return mock.MagicMock(return_value=(
-        {'status': http_client.OK, 'content-type': 'text/html'},
+        httplib2.Response(
+            {'status': http_client.OK, 'content-type': 'text/html'}
+        ),
         '<p>Hello World!</p>'.encode('utf-8')
     ))
 
 
 def get_error_request_mock():
     return mock.MagicMock(return_value=(
-        {'status': http_client.NOT_FOUND, 'content-type': 'text/html'},
+        httplib2.Response(
+            {'status': http_client.NOT_FOUND, 'content-type': 'text/html'}
+        ),
         '<p>Error</p>'.encode('utf-8')
     ))
 
@@ -78,7 +84,7 @@ class TestMetadata(unittest2.TestCase):
         http_request.assert_called_once_with(*EXPECTED_ARGS, **EXPECTED_KWARGS)
 
     @mock.patch('oauth2client.client._UTCNOW', return_value=datetime.datetime.min)
-    def test_get_token_success(self):
+    def test_get_token_success(self, now):
         http_request = mock.MagicMock(
             return_value=(
                 {'status': http_client.OK, 'content-type': 'application/json'},
@@ -92,6 +98,7 @@ class TestMetadata(unittest2.TestCase):
             'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
             **EXPECTED_KWARGS
         )
+        now.assert_called_once_with()
 
     def test_get_token_failed_fetch(self):
         http_request = mock.MagicMock(

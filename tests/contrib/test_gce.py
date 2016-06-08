@@ -53,12 +53,11 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         self.assertEqual(credentials.access_token,
                          credentials_from_json.access_token)
 
-    @mock.patch('oauth2client.contrib.metadata.MetadataServer',
-                return_value=mock.MagicMock(
-                    get_access_token=mock.Mock(
-                        side_effect=[('A', 0), ('B', datetime.datetime.max)])))
+    @mock.patch('oauth2client.contrib.metadata.get_access_token',
+                return_value=mock.Mock(
+                    side_effect=[('A', 0), ('B', datetime.datetime.max)]))
     def test_refresh_token(self, metadata):
-        credentials = AppAssertionCredentials(metadata_server=metadata)
+        credentials = AppAssertionCredentials()
         self.assertIsNone(credentials.access_token)
         credentials.get_access_token()
         self.assertEqual(credentials.access_token, 'A')
@@ -96,12 +95,11 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         with self.assertRaises(NotImplementedError):
             credentials.sign_blob(b'blob')
 
-    @mock.patch('oauth2client.contrib.metadata.MetadataServer',
+    @mock.patch('oauth2client.contrib.metadata.get_service_account_info',
                 return_value=mock.MagicMock(
-                    get_service_account_info=mock.MagicMock(
-                        return_value={'email': 'a@example.com'})))
+                    return_value={'email': 'a@example.com'}))
     def test_service_account_email(self, metadata):
-        credentials = AppAssertionCredentials(metadata_server=metadata)
+        credentials = AppAssertionCredentials()
         # Assert that service account isn't pre-fetched
         metadata.assert_not_called()
         self.assertEqual(credentials.service_account_email, 'a@example.com')
