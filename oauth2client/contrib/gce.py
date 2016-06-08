@@ -32,9 +32,6 @@ __author__ = 'jcgregorio@google.com (Joe Gregorio)'
 
 logger = logging.getLogger(__name__)
 
-# Backwards Compat
-META = ('http://metadata.google.internal/computeMetadata/v1/'
-        'instance/service-accounts/default/token')
 _SCOPES_WARNING = """\
 You have requested explicit scopes to be used with a GCE service account.
 Using this argument will have no effect on the actual scopes for tokens
