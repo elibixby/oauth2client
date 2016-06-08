@@ -25,7 +25,9 @@ import json
 import os
 import socket
 import sys
+import tempfile
 
+import httplib2
 import mock
 import six
 from six.moves import http_client
@@ -48,6 +50,7 @@ from oauth2client.client import AssertionCredentials
 from oauth2client.client import AUTHORIZED_USER
 from oauth2client.client import Credentials
 from oauth2client.client import DEFAULT_ENV_NAME
+from oauth2client.client import DeviceFlowInfo
 from oauth2client.client import Error
 from oauth2client.client import ApplicationDefaultCredentialsError
 from oauth2client.client import FlowExchangeError
@@ -78,6 +81,8 @@ from oauth2client.client import credentials_from_code
 from oauth2client.client import flow_from_clientsecrets
 from oauth2client.client import save_to_well_known_file
 from oauth2client.clientsecrets import _loadfile
+from oauth2client.clientsecrets import InvalidClientSecretsError
+from oauth2client.clientsecrets import TYPE_WEB
 from oauth2client.service_account import ServiceAccountCredentials
 from oauth2client._helpers import _to_bytes
 
@@ -121,6 +126,160 @@ class CredentialsTests(unittest2.TestCase):
         json = credentials.to_json()
         restored = Credentials.new_from_json(json)
 
+    def test_authorize_abstract(self):
+        credentials = Credentials()
+        http = object()
+        with self.assertRaises(NotImplementedError):
+            credentials.authorize(http)
+
+    def test_refresh_abstract(self):
+        credentials = Credentials()
+        http = object()
+        with self.assertRaises(NotImplementedError):
+            credentials.refresh(http)
+
+    def test_revoke_abstract(self):
+        credentials = Credentials()
+        http = object()
+        with self.assertRaises(NotImplementedError):
+            credentials.revoke(http)
+
+    def test_apply_abstract(self):
+        credentials = Credentials()
+        headers = {}
+        with self.assertRaises(NotImplementedError):
+            credentials.apply(headers)
+
+    def test__to_json_basic(self):
+        credentials = Credentials()
+        json_payload = credentials._to_json([])
+        # str(bytes) in Python2 and str(unicode) in Python3
+        self.assertIsInstance(json_payload, str)
+        payload = json.loads(json_payload)
+        expected_payload = {
+            '_class': Credentials.__name__,
+            '_module': Credentials.__module__,
+            'token_expiry': None,
+        }
+        self.assertEqual(payload, expected_payload)
+
+    def test__to_json_with_strip(self):
+        credentials = Credentials()
+        credentials.foo = 'bar'
+        credentials.baz = 'quux'
+        to_strip = ['foo']
+        json_payload = credentials._to_json(to_strip)
+        # str(bytes) in Python2 and str(unicode) in Python3
+        self.assertIsInstance(json_payload, str)
+        payload = json.loads(json_payload)
+        expected_payload = {
+            '_class': Credentials.__name__,
+            '_module': Credentials.__module__,
+            'token_expiry': None,
+            'baz': credentials.baz,
+        }
+        self.assertEqual(payload, expected_payload)
+
+    def test__to_json_to_serialize(self):
+        credentials = Credentials()
+        to_serialize = {
+            'foo': b'bar',
+            'baz': u'quux',
+            'st': set(['a', 'b']),
+        }
+        orig_vals = to_serialize.copy()
+        json_payload = credentials._to_json([], to_serialize=to_serialize)
+        # str(bytes) in Python2 and str(unicode) in Python3
+        self.assertIsInstance(json_payload, str)
+        payload = json.loads(json_payload)
+        expected_payload = {
+            '_class': Credentials.__name__,
+            '_module': Credentials.__module__,
+            'token_expiry': None,
+        }
+        expected_payload.update(to_serialize)
+        # Special-case the set.
+        expected_payload['st'] = list(expected_payload['st'])
+        # Special-case the bytes.
+        expected_payload['foo'] = u'bar'
+        self.assertEqual(payload, expected_payload)
+        # Make sure the method call didn't modify our dictionary.
+        self.assertEqual(to_serialize, orig_vals)
+
+    @mock.patch.object(Credentials, '_to_json',
+                       return_value=object())
+    def test_to_json(self, to_json):
+        credentials = Credentials()
+        self.assertEqual(credentials.to_json(), to_json.return_value)
+        to_json.assert_called_once_with(Credentials.NON_SERIALIZED_MEMBERS)
+
+    def test_new_from_json_no_data(self):
+        creds_data = {}
+        json_data = json.dumps(creds_data)
+        with self.assertRaises(KeyError):
+            Credentials.new_from_json(json_data)
+
+    def test_new_from_json_basic_data(self):
+        creds_data = {
+            '_module': 'oauth2client.client',
+            '_class': 'Credentials',
+        }
+        json_data = json.dumps(creds_data)
+        credentials = Credentials.new_from_json(json_data)
+        self.assertIsInstance(credentials, Credentials)
+
+    def test_new_from_json_old_name(self):
+        creds_data = {
+            '_module': 'oauth2client.googleapiclient.client',
+            '_class': 'Credentials',
+        }
+        json_data = json.dumps(creds_data)
+        credentials = Credentials.new_from_json(json_data)
+        self.assertIsInstance(credentials, Credentials)
+
+    def test_new_from_json_bad_module(self):
+        creds_data = {
+            '_module': 'oauth2client.foobar',
+            '_class': 'Credentials',
+        }
+        json_data = json.dumps(creds_data)
+        with self.assertRaises(ImportError):
+            Credentials.new_from_json(json_data)
+
+    def test_new_from_json_bad_class(self):
+        creds_data = {
+            '_module': 'oauth2client.client',
+            '_class': 'NopeNotCredentials',
+        }
+        json_data = json.dumps(creds_data)
+        with self.assertRaises(AttributeError):
+            Credentials.new_from_json(json_data)
+
+    def test_from_json(self):
+        unused_data = {}
+        credentials = Credentials.from_json(unused_data)
+        self.assertIsInstance(credentials, Credentials)
+        self.assertEqual(credentials.__dict__, {})
+
+
+class TestStorage(unittest2.TestCase):
+
+    def test_locked_get_abstract(self):
+        storage = Storage()
+        with self.assertRaises(NotImplementedError):
+            storage.locked_get()
+
+    def test_locked_put_abstract(self):
+        storage = Storage()
+        credentials = object()
+        with self.assertRaises(NotImplementedError):
+            storage.locked_put(credentials)
+
+    def test_locked_delete_abstract(self):
+        storage = Storage()
+        with self.assertRaises(NotImplementedError):
+            storage.locked_delete()
+
 
 @contextlib.contextmanager
 def mock_module_import(module):
@@ -142,7 +301,6 @@ class GoogleCredentialsTests(unittest2.TestCase):
 
     def setUp(self):
         self.os_name = os.name
-        from oauth2client import client
         client.SETTINGS.env_name = None
 
     def tearDown(self):
@@ -186,6 +344,40 @@ class GoogleCredentialsTests(unittest2.TestCase):
         self.assertEqual(credentials, credentials.create_scoped(None))
         self.assertEqual(credentials,
                          credentials.create_scoped(['dummy_scope']))
+
+    @mock.patch.object(GoogleCredentials,
+                       '_implicit_credentials_from_files')
+    @mock.patch.object(GoogleCredentials,
+                       '_implicit_credentials_from_gce')
+    @mock.patch.object(client, '_in_gae_environment',
+                       return_value=True)
+    @mock.patch.object(client, '_get_application_default_credential_GAE',
+                       return_value=object())
+    def test_get_application_default_in_gae(self, gae_adc, in_gae,
+                                            from_gce, from_files):
+        credentials = GoogleCredentials.get_application_default()
+        self.assertEqual(credentials, gae_adc.return_value)
+        in_gae.assert_called_once_with()
+        from_files.assert_not_called()
+        from_gce.assert_not_called()
+
+    @mock.patch.object(GoogleCredentials,
+                       '_implicit_credentials_from_gae',
+                       return_value=None)
+    @mock.patch.object(GoogleCredentials,
+                       '_implicit_credentials_from_files',
+                       return_value=None)
+    @mock.patch.object(client, '_in_gce_environment',
+                       return_value=True)
+    @mock.patch.object(client, '_get_application_default_credential_GCE',
+                       return_value=object())
+    def test_get_application_default_in_gce(self, gce_adc, in_gce,
+                                            from_files, from_gae):
+        credentials = GoogleCredentials.get_application_default()
+        self.assertEqual(credentials, gce_adc.return_value)
+        in_gce.assert_called_once_with()
+        from_gae.assert_called_once_with()
+        from_files.assert_called_once_with()
 
     def test_environment_check_gae_production(self):
         with mock_module_import('google.appengine'):
@@ -306,12 +498,24 @@ class GoogleCredentialsTests(unittest2.TestCase):
                                      expected_err_msg):
             _get_environment_variable_file()
 
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_get_environment_variable_file_without_env_var(self):
+        self.assertIsNone(_get_environment_variable_file())
+
     @mock.patch('os.name', new='nt')
     @mock.patch.dict(os.environ, {'APPDATA': DATA_DIR}, clear=True)
     def test_get_well_known_file_on_windows(self):
         well_known_file = datafile(
             os.path.join(client._CLOUDSDK_CONFIG_DIRECTORY,
                          _WELL_KNOWN_CREDENTIALS_FILE))
+        self.assertEqual(well_known_file, _get_well_known_file())
+
+    @mock.patch('os.name', new='nt')
+    @mock.patch.dict(os.environ, {'SystemDrive': 'G:'}, clear=True)
+    def test_get_well_known_file_on_windows_without_appdata(self):
+        well_known_file = os.path.join('G:', '\\',
+                                       client._CLOUDSDK_CONFIG_DIRECTORY,
+                                       client._WELL_KNOWN_CREDENTIALS_FILE)
         self.assertEqual(well_known_file, _get_well_known_file())
 
     @mock.patch.dict(os.environ,
@@ -438,7 +642,7 @@ class GoogleCredentialsTests(unittest2.TestCase):
     @mock.patch('oauth2client.client._in_gae_environment', return_value=False)
     @mock.patch('oauth2client.client._get_environment_variable_file')
     @mock.patch('oauth2client.client._get_well_known_file')
-    def test_get_adc_from_environment_variable_service_account(self, *stubs):
+    def test_get_adc_from_env_var_service_account(self, *stubs):
         # Set up stubs.
         get_well_known, get_env_file, in_gae, in_gce = stubs
         get_env_file.return_value = datafile(
@@ -453,16 +657,15 @@ class GoogleCredentialsTests(unittest2.TestCase):
         in_gae.assert_called_once_with()
 
     def test_env_name(self):
-        from oauth2client import client
         self.assertEqual(None, client.SETTINGS.env_name)
-        self.test_get_adc_from_environment_variable_service_account()
+        self.test_get_adc_from_env_var_service_account()
         self.assertEqual(DEFAULT_ENV_NAME, client.SETTINGS.env_name)
 
     @mock.patch('oauth2client.client._in_gce_environment')
     @mock.patch('oauth2client.client._in_gae_environment', return_value=False)
     @mock.patch('oauth2client.client._get_environment_variable_file')
     @mock.patch('oauth2client.client._get_well_known_file')
-    def test_get_adc_from_environment_variable_authorized_user(self, *stubs):
+    def test_get_adc_from_env_var_authorized_user(self, *stubs):
         # Set up stubs.
         get_well_known, get_env_file, in_gae, in_gce = stubs
         get_env_file.return_value = datafile(os.path.join(
@@ -481,7 +684,7 @@ class GoogleCredentialsTests(unittest2.TestCase):
     @mock.patch('oauth2client.client._in_gae_environment', return_value=False)
     @mock.patch('oauth2client.client._get_environment_variable_file')
     @mock.patch('oauth2client.client._get_well_known_file')
-    def test_get_adc_from_environment_variable_malformed_file(self, *stubs):
+    def test_get_adc_from_env_var_malformed_file(self, *stubs):
         # Set up stubs.
         get_well_known, get_env_file, in_gae, in_gce = stubs
         get_env_file.return_value = datafile(
@@ -508,7 +711,7 @@ class GoogleCredentialsTests(unittest2.TestCase):
                 return_value=None)
     @mock.patch('oauth2client.client._get_well_known_file',
                 return_value='BOGUS_FILE')
-    def test_get_application_default_environment_not_set_up(self, *stubs):
+    def test_get_adc_env_not_set_up(self, *stubs):
         # Unpack stubs.
         get_well_known, get_env_file, in_gae, in_gce = stubs
         # Make sure the well-known file actually doesn't exist.
@@ -524,6 +727,33 @@ class GoogleCredentialsTests(unittest2.TestCase):
         in_gae.assert_called_once_with()
         in_gce.assert_called_once_with()
 
+    @mock.patch('oauth2client.client._in_gce_environment', return_value=False)
+    @mock.patch('oauth2client.client._in_gae_environment', return_value=False)
+    @mock.patch('oauth2client.client._get_environment_variable_file',
+                return_value=None)
+    @mock.patch('oauth2client.client._get_well_known_file')
+    def test_get_adc_env_from_well_known(self, *stubs):
+        # Unpack stubs.
+        get_well_known, get_env_file, in_gae, in_gce = stubs
+        # Make sure the well-known file is an actual file.
+        get_well_known.return_value = __file__
+        # Make sure the well-known file actually doesn't exist.
+        self.assertTrue(os.path.exists(get_well_known.return_value))
+
+        method_name = ('oauth2client.client.'
+                       '_get_application_default_credential_from_file')
+        result_creds = object()
+        with mock.patch(method_name,
+                        return_value=result_creds) as get_from_file:
+            result = GoogleCredentials.get_application_default()
+            self.assertEqual(result, result_creds)
+            get_from_file.assert_called_once_with(__file__)
+
+        get_well_known.assert_called_once_with()
+        get_env_file.assert_called_once_with()
+        in_gae.assert_called_once_with()
+        in_gce.assert_not_called()
+
     def test_from_stream_service_account(self):
         credentials_file = datafile(
             os.path.join('gcloud', _WELL_KNOWN_CREDENTIALS_FILE))
@@ -538,6 +768,15 @@ class GoogleCredentialsTests(unittest2.TestCase):
         credentials = self.get_a_google_credentials_object().from_stream(
             credentials_file)
         self.validate_google_credentials(credentials)
+
+    def test_from_stream_missing_file(self):
+        credentials_filename = None
+        expected_err_msg = (r'The parameter passed to the from_stream\(\) '
+                            r'method should point to a file.')
+        with self.assertRaisesRegexp(ApplicationDefaultCredentialsError,
+                                     expected_err_msg):
+            self.get_a_google_credentials_object().from_stream(
+                credentials_filename)
 
     def test_from_stream_malformed_file_1(self):
         credentials_file = datafile(
@@ -601,6 +840,20 @@ class GoogleCredentialsTests(unittest2.TestCase):
         creds2_vals.pop('_signer')
         self.assertEqual(creds1_vals, creds2_vals)
 
+    def test_to_from_json_service_account_scoped(self):
+        credentials_file = datafile(
+            os.path.join('gcloud', _WELL_KNOWN_CREDENTIALS_FILE))
+        creds1 = GoogleCredentials.from_stream(credentials_file)
+        creds1 = creds1.create_scoped(['dummy_scope'])
+        # Convert to and then back from json.
+        creds2 = GoogleCredentials.from_json(creds1.to_json())
+
+        creds1_vals = creds1.__dict__
+        creds1_vals.pop('_signer')
+        creds2_vals = creds2.__dict__
+        creds2_vals.pop('_signer')
+        self.assertEqual(creds1_vals, creds2_vals)
+
     def test_parse_expiry(self):
         dt = datetime.datetime(2016, 1, 1)
         parsed_expiry = client._parse_expiry(dt)
@@ -610,6 +863,7 @@ class GoogleCredentialsTests(unittest2.TestCase):
         dt = object()
         parsed_expiry = client._parse_expiry(dt)
         self.assertEqual(None, parsed_expiry)
+
 
 class DummyDeleteStorage(Storage):
     delete_called = False
@@ -835,6 +1089,35 @@ class BasicCredentialsTests(unittest2.TestCase):
         instance = OAuth2Credentials.from_json(self.credentials.to_json())
         self.assertEqual('foobar', instance.token_response)
 
+    def test__expires_in_no_expiry(self):
+        credentials = OAuth2Credentials(None, None, None, None,
+                                        None, None, None)
+        self.assertIsNone(credentials.token_expiry)
+        self.assertIsNone(credentials._expires_in())
+
+    @mock.patch('oauth2client.client._UTCNOW')
+    def test__expires_in_expired(self, utcnow):
+        credentials = OAuth2Credentials(None, None, None, None,
+                                        None, None, None)
+        credentials.token_expiry = datetime.datetime.utcnow()
+        now = credentials.token_expiry + datetime.timedelta(seconds=1)
+        self.assertLess(credentials.token_expiry, now)
+        utcnow.return_value = now
+        self.assertEqual(credentials._expires_in(), 0)
+        utcnow.assert_called_once_with()
+
+    @mock.patch('oauth2client.client._UTCNOW')
+    def test__expires_in_not_expired(self, utcnow):
+        credentials = OAuth2Credentials(None, None, None, None,
+                                        None, None, None)
+        credentials.token_expiry = datetime.datetime.utcnow()
+        seconds = 1234
+        now = credentials.token_expiry - datetime.timedelta(seconds=seconds)
+        self.assertLess(now, credentials.token_expiry)
+        utcnow.return_value = now
+        self.assertEqual(credentials._expires_in(), seconds)
+        utcnow.assert_called_once_with()
+
     @mock.patch('oauth2client.client._UTCNOW')
     def test_get_access_token(self, utcnow):
         # Configure the patch.
@@ -918,6 +1201,281 @@ class BasicCredentialsTests(unittest2.TestCase):
         # - access_token_expired
         expected_utcnow_calls = [mock.call()] * (2 + 3 + 5)
         self.assertEqual(expected_utcnow_calls, utcnow.mock_calls)
+
+    @mock.patch.object(OAuth2Credentials, 'refresh')
+    @mock.patch.object(OAuth2Credentials, '_expires_in',
+                       return_value=1835)
+    def test_get_access_token_without_http(self, expires_in, refresh_mock):
+        credentials = OAuth2Credentials(None, None, None, None,
+                                        None, None, None)
+        # Make sure access_token_expired returns True
+        credentials.invalid = True
+        # Specify a token so we can use it in the response.
+        credentials.access_token = 'ya29-s3kr3t'
+
+        with mock.patch('httplib2.Http',
+                        return_value=object) as http_kls:
+            token_info = credentials.get_access_token()
+            expires_in.assert_called_once_with()
+            refresh_mock.assert_called_once_with(http_kls.return_value)
+
+        self.assertIsInstance(token_info, client.AccessTokenInfo)
+        self.assertEqual(token_info.access_token,
+                         credentials.access_token)
+        self.assertEqual(token_info.expires_in,
+                         expires_in.return_value)
+
+    @mock.patch.object(OAuth2Credentials, 'refresh')
+    @mock.patch.object(OAuth2Credentials, '_expires_in',
+                       return_value=1835)
+    def test_get_access_token_with_http(self, expires_in, refresh_mock):
+        credentials = OAuth2Credentials(None, None, None, None,
+                                        None, None, None)
+        # Make sure access_token_expired returns True
+        credentials.invalid = True
+        # Specify a token so we can use it in the response.
+        credentials.access_token = 'ya29-s3kr3t'
+
+        http_obj = object()
+        token_info = credentials.get_access_token(http_obj)
+        self.assertIsInstance(token_info, client.AccessTokenInfo)
+        self.assertEqual(token_info.access_token,
+                         credentials.access_token)
+        self.assertEqual(token_info.expires_in,
+                         expires_in.return_value)
+
+        expires_in.assert_called_once_with()
+        refresh_mock.assert_called_once_with(http_obj)
+
+    @mock.patch.object(OAuth2Credentials, '_generate_refresh_request_headers',
+                       return_value=object())
+    @mock.patch.object(OAuth2Credentials, '_generate_refresh_request_body',
+                       return_value=object())
+    @mock.patch('oauth2client.client.logger')
+    def _do_refresh_request_test_helper(self, response, content,
+                                        error_msg, logger, gen_body,
+                                        gen_headers, store=None):
+        credentials = OAuth2Credentials(None, None, None, None,
+                                        None, None, None)
+        credentials.store = store
+        http_request = mock.Mock()
+        http_request.return_value = response, content
+
+        with self.assertRaises(HttpAccessTokenRefreshError) as exc_manager:
+            credentials._do_refresh_request(http_request)
+
+        self.assertEqual(exc_manager.exception.args, (error_msg,))
+        self.assertEqual(exc_manager.exception.status, response.status)
+        http_request.assert_called_once_with(None, body=gen_body.return_value,
+                                             headers=gen_headers.return_value,
+                                             method='POST')
+
+        call1 = mock.call('Refreshing access_token')
+        failure_template = 'Failed to retrieve access token: %s'
+        call2 = mock.call(failure_template, content)
+        self.assertEqual(logger.info.mock_calls, [call1, call2])
+        if store is not None:
+            store.locked_put.assert_called_once_with(credentials)
+
+    def test__do_refresh_request_non_json_failure(self):
+        response = httplib2.Response({
+            'status': http_client.BAD_REQUEST,
+        })
+        content = u'Bad request'
+        error_msg = 'Invalid response %s.' % (response.status,)
+        self._do_refresh_request_test_helper(response, content, error_msg)
+
+    def test__do_refresh_request_basic_failure(self):
+        response = httplib2.Response({
+            'status': http_client.INTERNAL_SERVER_ERROR,
+        })
+        content = u'{}'
+        error_msg = 'Invalid response %s.' % (response.status,)
+        self._do_refresh_request_test_helper(response, content, error_msg)
+
+    def test__do_refresh_request_failure_w_json_error(self):
+        response = httplib2.Response({
+            'status': http_client.BAD_GATEWAY,
+        })
+        error_msg = 'Hi I am an error not a bearer'
+        content = json.dumps({'error': error_msg})
+        self._do_refresh_request_test_helper(response, content, error_msg)
+
+    def test__do_refresh_request_failure_w_json_error_and_store(self):
+        response = httplib2.Response({
+            'status': http_client.BAD_GATEWAY,
+        })
+        error_msg = 'Where are we going wearer?'
+        content = json.dumps({'error': error_msg})
+        store = mock.MagicMock()
+        self._do_refresh_request_test_helper(response, content, error_msg,
+                                             store=store)
+
+    def test__do_refresh_request_failure_w_json_error_and_desc(self):
+        response = httplib2.Response({
+            'status': http_client.SERVICE_UNAVAILABLE,
+        })
+        base_error = 'Ruckus'
+        error_desc = 'Can you describe the ruckus'
+        content = json.dumps({
+            'error': base_error,
+            'error_description': error_desc,
+        })
+        error_msg = '%s: %s' % (base_error, error_desc)
+        self._do_refresh_request_test_helper(response, content, error_msg)
+
+    @mock.patch('oauth2client.client.logger')
+    def _do_revoke_test_helper(self, response, content,
+                               error_msg, logger, store=None):
+        credentials = OAuth2Credentials(None, None, None, None,
+                                        None, None, None,
+                                        revoke_uri=GOOGLE_REVOKE_URI)
+        credentials.store = store
+        http_request = mock.Mock()
+        http_request.return_value = response, content
+        token = u's3kr3tz'
+
+        if response.status == http_client.OK:
+            self.assertFalse(credentials.invalid)
+            self.assertIsNone(credentials._do_revoke(http_request, token))
+            self.assertTrue(credentials.invalid)
+            if store is not None:
+                store.delete.assert_called_once_with()
+        else:
+            self.assertFalse(credentials.invalid)
+            with self.assertRaises(TokenRevokeError) as exc_manager:
+                credentials._do_revoke(http_request, token)
+            # Make sure invalid was not flipped on.
+            self.assertFalse(credentials.invalid)
+            self.assertEqual(exc_manager.exception.args, (error_msg,))
+            if store is not None:
+                store.delete.assert_not_called()
+
+        revoke_uri = GOOGLE_REVOKE_URI + '?token=' + token
+        http_request.assert_called_once_with(revoke_uri)
+
+        logger.info.assert_called_once_with('Revoking token')
+
+    def test__do_revoke_success(self):
+        response = httplib2.Response({
+            'status': http_client.OK,
+        })
+        self._do_revoke_test_helper(response, b'', None)
+
+    def test__do_revoke_success_with_store(self):
+        response = httplib2.Response({
+            'status': http_client.OK,
+        })
+        store = mock.MagicMock()
+        self._do_revoke_test_helper(response, b'', None, store=store)
+
+    def test__do_revoke_non_json_failure(self):
+        response = httplib2.Response({
+            'status': http_client.BAD_REQUEST,
+        })
+        content = u'Bad request'
+        error_msg = 'Invalid response %s.' % (response.status,)
+        self._do_revoke_test_helper(response, content, error_msg)
+
+    def test__do_revoke_basic_failure(self):
+        response = httplib2.Response({
+            'status': http_client.INTERNAL_SERVER_ERROR,
+        })
+        content = u'{}'
+        error_msg = 'Invalid response %s.' % (response.status,)
+        self._do_revoke_test_helper(response, content, error_msg)
+
+    def test__do_revoke_failure_w_json_error(self):
+        response = httplib2.Response({
+            'status': http_client.BAD_GATEWAY,
+        })
+        error_msg = 'Hi I am an error not a bearer'
+        content = json.dumps({'error': error_msg})
+        self._do_revoke_test_helper(response, content, error_msg)
+
+    def test__do_revoke_failure_w_json_error_and_store(self):
+        response = httplib2.Response({
+            'status': http_client.BAD_GATEWAY,
+        })
+        error_msg = 'Where are we going wearer?'
+        content = json.dumps({'error': error_msg})
+        store = mock.MagicMock()
+        self._do_revoke_test_helper(response, content, error_msg,
+                                    store=store)
+
+    @mock.patch('oauth2client.client.logger')
+    def _do_retrieve_scopes_test_helper(self, response, content,
+                                        error_msg, logger, scopes=None):
+        credentials = OAuth2Credentials(None, None, None, None,
+                                        None, None, None,
+                                        token_info_uri=GOOGLE_TOKEN_INFO_URI)
+        http_request = mock.Mock()
+        http_request.return_value = response, content
+        token = u's3kr3tz'
+
+        if response.status == http_client.OK:
+            self.assertEqual(credentials.scopes, set())
+            self.assertIsNone(
+                credentials._do_retrieve_scopes(http_request, token))
+            self.assertEqual(credentials.scopes, scopes)
+        else:
+            self.assertEqual(credentials.scopes, set())
+            with self.assertRaises(client.Error) as exc_manager:
+                credentials._do_retrieve_scopes(http_request, token)
+            # Make sure scopes were not changed.
+            self.assertEqual(credentials.scopes, set())
+            self.assertEqual(exc_manager.exception.args, (error_msg,))
+
+        token_uri = _update_query_params(
+            GOOGLE_TOKEN_INFO_URI,
+            {'fields': 'scope', 'access_token': token})
+        self.assertEqual(len(http_request.mock_calls), 1)
+        scopes_call = http_request.mock_calls[0]
+        call_args = scopes_call[1]
+        self.assertEqual(len(call_args), 1)
+        called_uri = call_args[0]
+        assertUrisEqual(self, token_uri, called_uri)
+        logger.info.assert_called_once_with('Refreshing scopes')
+
+    def test__do_retrieve_scopes_success_bad_json(self):
+        response = httplib2.Response({
+            'status': http_client.OK,
+        })
+        invalid_json = b'{'
+        with self.assertRaises(ValueError):
+            self._do_retrieve_scopes_test_helper(response, invalid_json, None)
+
+    def test__do_retrieve_scopes_success(self):
+        response = httplib2.Response({
+            'status': http_client.OK,
+        })
+        content = b'{"scope": "foo bar"}'
+        self._do_retrieve_scopes_test_helper(response, content, None,
+                                             scopes=set(['foo', 'bar']))
+
+    def test__do_retrieve_scopes_non_json_failure(self):
+        response = httplib2.Response({
+            'status': http_client.BAD_REQUEST,
+        })
+        content = u'Bad request'
+        error_msg = 'Invalid response %s.' % (response.status,)
+        self._do_retrieve_scopes_test_helper(response, content, error_msg)
+
+    def test__do_retrieve_scopes_basic_failure(self):
+        response = httplib2.Response({
+            'status': http_client.INTERNAL_SERVER_ERROR,
+        })
+        content = u'{}'
+        error_msg = 'Invalid response %s.' % (response.status,)
+        self._do_retrieve_scopes_test_helper(response, content, error_msg)
+
+    def test__do_retrieve_scopes_failure_w_json_error(self):
+        response = httplib2.Response({
+            'status': http_client.BAD_GATEWAY,
+        })
+        error_msg = 'Error desc I sit at a desk'
+        content = json.dumps({'error_description': error_msg})
+        self._do_retrieve_scopes_test_helper(response, content, error_msg)
 
     def test_has_scopes(self):
         self.assertTrue(self.credentials.has_scopes('foo'))
@@ -1039,6 +1597,11 @@ class TestAssertionCredentials(unittest2.TestCase):
         self.credentials = self.AssertionCredentialsTestImpl(
             self.assertion_type, user_agent=user_agent)
 
+    def test__generate_assertion_abstract(self):
+        credentials = AssertionCredentials(None)
+        with self.assertRaises(NotImplementedError):
+            credentials._generate_assertion()
+
     def test_assertion_body(self):
         body = urllib.parse.parse_qs(
             self.credentials._generate_refresh_request_body())
@@ -1149,6 +1712,153 @@ class OAuth2WebServerFlowTest(unittest2.TestCase):
         self.assertEqual(OOB_CALLBACK_URN, q['redirect_uri'][0])
         self.assertEqual('online', q['access_type'][0])
 
+    @mock.patch('oauth2client.client.logger')
+    def test_step1_get_authorize_url_redirect_override(self, logger):
+        flow = OAuth2WebServerFlow('client_id+1', scope='foo',
+                                   redirect_uri=OOB_CALLBACK_URN)
+        alt_redirect = 'foo:bar'
+        self.assertEqual(flow.redirect_uri, OOB_CALLBACK_URN)
+        result = flow.step1_get_authorize_url(redirect_uri=alt_redirect)
+        # Make sure the redirect value was updated.
+        self.assertEqual(flow.redirect_uri, alt_redirect)
+        query_params = {
+            'client_id': flow.client_id,
+            'redirect_uri': alt_redirect,
+            'scope': flow.scope,
+            'access_type': 'offline',
+            'response_type': 'code',
+        }
+        expected = _update_query_params(flow.auth_uri, query_params)
+        assertUrisEqual(self, expected, result)
+        # Check stubs.
+        self.assertEqual(logger.warning.call_count, 1)
+
+    def test_step1_get_authorize_url_without_redirect(self):
+        flow = OAuth2WebServerFlow('client_id+1', scope='foo',
+                                   redirect_uri=None)
+        with self.assertRaises(ValueError):
+            flow.step1_get_authorize_url(redirect_uri=None)
+
+    def test_step1_get_authorize_url_without_login_hint(self):
+        login_hint = 'There are wascally wabbits nearby'
+        flow = OAuth2WebServerFlow('client_id+1', scope='foo',
+                                   redirect_uri=OOB_CALLBACK_URN,
+                                   login_hint=login_hint)
+        result = flow.step1_get_authorize_url()
+        query_params = {
+            'client_id': flow.client_id,
+            'login_hint': login_hint,
+            'redirect_uri': OOB_CALLBACK_URN,
+            'scope': flow.scope,
+            'access_type': 'offline',
+            'response_type': 'code',
+        }
+        expected = _update_query_params(flow.auth_uri, query_params)
+        assertUrisEqual(self, expected, result)
+
+    def test_step1_get_device_and_user_codes_wo_device_uri(self):
+        flow = OAuth2WebServerFlow('CID', scope='foo', device_uri=None)
+        with self.assertRaises(ValueError):
+            flow.step1_get_device_and_user_codes()
+
+    def _step1_get_device_and_user_codes_helper(
+            self, extra_headers=None, user_agent=None, default_http=False,
+            content=None):
+        flow = OAuth2WebServerFlow('CID', scope='foo',
+                                   user_agent=user_agent)
+        device_code = 'bfc06756-062e-430f-9f0f-460ca44724e5'
+        user_code = '5faf2780-fc83-11e5-9bc2-00c2c63e5792'
+        ver_url = 'http://foo.bar'
+        if content is None:
+            content = json.dumps({
+                'device_code': device_code,
+                'user_code': user_code,
+                'verification_url': ver_url,
+            })
+        http = HttpMockSequence([
+            ({'status': http_client.OK}, content),
+        ])
+        if default_http:
+            with mock.patch('httplib2.Http', return_value=http):
+                result = flow.step1_get_device_and_user_codes()
+        else:
+            result = flow.step1_get_device_and_user_codes(http=http)
+
+        expected = DeviceFlowInfo(device_code, user_code,
+                                  None, ver_url, None)
+        self.assertEqual(result, expected)
+        self.assertEqual(len(http.requests), 1)
+        self.assertEqual(http.requests[0]['uri'], client.GOOGLE_DEVICE_URI)
+        body = http.requests[0]['body']
+        self.assertEqual(urllib.parse.parse_qs(body),
+                         {'client_id': [flow.client_id],
+                          'scope': [flow.scope]})
+        headers = {'content-type': 'application/x-www-form-urlencoded'}
+        if extra_headers is not None:
+            headers.update(extra_headers)
+        self.assertEqual(http.requests[0]['headers'], headers)
+
+    def test_step1_get_device_and_user_codes(self):
+        self._step1_get_device_and_user_codes_helper()
+
+    def test_step1_get_device_and_user_codes_w_user_agent(self):
+        user_agent = 'spiderman'
+        extra_headers = {'user-agent': user_agent}
+        self._step1_get_device_and_user_codes_helper(
+            user_agent=user_agent, extra_headers=extra_headers)
+
+    def test_step1_get_device_and_user_codes_w_default_http(self):
+        self._step1_get_device_and_user_codes_helper(default_http=True)
+
+    def test_step1_get_device_and_user_codes_bad_payload(self):
+        non_json_content = b'{'
+        with self.assertRaises(client.OAuth2DeviceCodeError):
+            self._step1_get_device_and_user_codes_helper(
+                content=non_json_content)
+
+    def _step1_get_device_and_user_codes_fail_helper(self, status,
+                                                     content, error_msg):
+        flow = OAuth2WebServerFlow('CID', scope='foo')
+        http = HttpMockSequence([
+            ({'status': status}, content),
+        ])
+        with self.assertRaises(client.OAuth2DeviceCodeError) as exc_manager:
+            flow.step1_get_device_and_user_codes(http=http)
+
+        self.assertEqual(exc_manager.exception.args, (error_msg,))
+
+    def test_step1_get_device_and_user_codes_non_json_failure(self):
+        status = http_client.BAD_REQUEST
+        content = 'Nope not JSON.'
+        error_msg = 'Invalid response %s.' % (status,)
+        self._step1_get_device_and_user_codes_fail_helper(status, content,
+                                                          error_msg)
+
+    def test_step1_get_device_and_user_codes_basic_failure(self):
+        status = http_client.INTERNAL_SERVER_ERROR
+        content = b'{}'
+        error_msg = 'Invalid response %s.' % (status,)
+        self._step1_get_device_and_user_codes_fail_helper(status, content,
+                                                          error_msg)
+
+    def test_step1_get_device_and_user_codes_failure_w_json_error(self):
+        status = http_client.BAD_GATEWAY
+        base_error = 'ZOMG user codes failure.'
+        content = json.dumps({'error': base_error})
+        error_msg = 'Invalid response %s. Error: %s' % (status, base_error)
+        self._step1_get_device_and_user_codes_fail_helper(status, content,
+                                                          error_msg)
+
+    def test_step2_exchange_no_input(self):
+        flow = OAuth2WebServerFlow('client_id+1', scope='foo')
+        with self.assertRaises(ValueError):
+            flow.step2_exchange()
+
+    def test_step2_exchange_code_and_device_flow(self):
+        flow = OAuth2WebServerFlow('client_id+1', scope='foo')
+        with self.assertRaises(ValueError):
+            flow.step2_exchange(code='code', device_flow_info='dfi')
+
     def test_scope_is_required(self):
         self.assertRaises(TypeError, OAuth2WebServerFlow, 'client_id+1')
 
@@ -1158,7 +1868,7 @@ class OAuth2WebServerFlowTest(unittest2.TestCase):
         ])
 
         with self.assertRaises(FlowExchangeError):
-            credentials = self.flow.step2_exchange('some random code',
+            credentials = self.flow.step2_exchange(code='some random code',
                                                    http=http)
 
     def test_urlencoded_exchange_failure(self):
@@ -1168,7 +1878,7 @@ class OAuth2WebServerFlowTest(unittest2.TestCase):
 
         with self.assertRaisesRegexp(FlowExchangeError,
                                      'invalid_request'):
-            credentials = self.flow.step2_exchange('some random code',
+            credentials = self.flow.step2_exchange(code='some random code',
                                                    http=http)
 
     def test_exchange_failure_with_json_error(self):
@@ -1185,22 +1895,31 @@ class OAuth2WebServerFlowTest(unittest2.TestCase):
         http = HttpMockSequence([({'status': '400'}, payload)])
 
         with self.assertRaises(FlowExchangeError):
-            credentials = self.flow.step2_exchange('some random code',
+            credentials = self.flow.step2_exchange(code='some random code',
                                                    http=http)
 
-    def test_exchange_success(self):
+    def _exchange_success_test_helper(self, code=None, device_flow_info=None):
         payload = (b'{'
                    b'  "access_token":"SlAV32hkKG",'
                    b'  "expires_in":3600,'
                    b'  "refresh_token":"8xLOxBtZp8"'
                    b'}')
         http = HttpMockSequence([({'status': '200'}, payload)])
-        credentials = self.flow.step2_exchange('some random code', http=http)
+        credentials = self.flow.step2_exchange(
+            code=code, device_flow_info=device_flow_info, http=http)
         self.assertEqual('SlAV32hkKG', credentials.access_token)
         self.assertNotEqual(None, credentials.token_expiry)
         self.assertEqual('8xLOxBtZp8', credentials.refresh_token)
         self.assertEqual('dummy_revoke_uri', credentials.revoke_uri)
         self.assertEqual(set(['foo']), credentials.scopes)
+
+    def test_exchange_success(self):
+        self._exchange_success_test_helper(code='some random code')
+
+    def test_exchange_success_with_device_flow_info(self):
+        device_flow_info = DeviceFlowInfo('some random code', None,
+                                          None, None, None)
+        self._exchange_success_test_helper(device_flow_info=device_flow_info)
 
     def test_exchange_success_binary_code(self):
         binary_code = b'some random code'
@@ -1215,7 +1934,7 @@ class OAuth2WebServerFlowTest(unittest2.TestCase):
                    '  "refresh_token":"' + refresh_token + '"'
                    '}')
         http = HttpMockSequence([({'status': '200'}, _to_bytes(payload))])
-        credentials = self.flow.step2_exchange(binary_code, http=http)
+        credentials = self.flow.step2_exchange(code=binary_code, http=http)
         self.assertEqual(access_token, credentials.access_token)
         self.assertIsNotNone(credentials.token_expiry)
         self.assertEqual(refresh_token, credentials.refresh_token)
@@ -1242,7 +1961,7 @@ class OAuth2WebServerFlowTest(unittest2.TestCase):
                    b'}')
         http = HttpMockSequence([({'status': '200'}, payload)])
 
-        credentials = self.flow.step2_exchange(not_a_dict, http=http)
+        credentials = self.flow.step2_exchange(code=not_a_dict, http=http)
         self.assertEqual('SlAV32hkKG', credentials.access_token)
         self.assertNotEqual(None, credentials.token_expiry)
         self.assertEqual('8xLOxBtZp8', credentials.refresh_token)
@@ -1266,7 +1985,7 @@ class OAuth2WebServerFlowTest(unittest2.TestCase):
             ({'status': '200'}, b'access_token=SlAV32hkKG'),
         ])
 
-        credentials = flow.step2_exchange('some random code', http=http)
+        credentials = flow.step2_exchange(code='some random code', http=http)
         self.assertEqual('SlAV32hkKG', credentials.access_token)
 
         test_request = http.requests[0]
@@ -1280,7 +1999,8 @@ class OAuth2WebServerFlowTest(unittest2.TestCase):
             ({'status': '200'}, b'access_token=SlAV32hkKG&expires_in=3600'),
         ])
 
-        credentials = self.flow.step2_exchange('some random code', http=http)
+        credentials = self.flow.step2_exchange(code='some random code',
+                                               http=http)
         self.assertEqual('SlAV32hkKG', credentials.access_token)
         self.assertNotEqual(None, credentials.token_expiry)
 
@@ -1291,7 +2011,8 @@ class OAuth2WebServerFlowTest(unittest2.TestCase):
             ({'status': '200'}, b'access_token=SlAV32hkKG&expires=3600'),
         ])
 
-        credentials = self.flow.step2_exchange('some random code', http=http)
+        credentials = self.flow.step2_exchange(code='some random code',
+                                               http=http)
         self.assertNotEqual(None, credentials.token_expiry)
 
     def test_exchange_no_expires_in(self):
@@ -1301,7 +2022,8 @@ class OAuth2WebServerFlowTest(unittest2.TestCase):
                    b'}')
         http = HttpMockSequence([({'status': '200'}, payload)])
 
-        credentials = self.flow.step2_exchange('some random code', http=http)
+        credentials = self.flow.step2_exchange(code='some random code',
+                                               http=http)
         self.assertEqual(None, credentials.token_expiry)
 
     def test_urlencoded_exchange_no_expires_in(self):
@@ -1311,7 +2033,8 @@ class OAuth2WebServerFlowTest(unittest2.TestCase):
             ({'status': '200'}, b'access_token=SlAV32hkKG'),
         ])
 
-        credentials = self.flow.step2_exchange('some random code', http=http)
+        credentials = self.flow.step2_exchange(code='some random code',
+                                               http=http)
         self.assertEqual(None, credentials.token_expiry)
 
     def test_exchange_fails_if_no_code(self):
@@ -1324,7 +2047,7 @@ class OAuth2WebServerFlowTest(unittest2.TestCase):
         code = {'error': 'thou shall not pass'}
         with self.assertRaisesRegexp(FlowExchangeError,
                                      'shall not pass'):
-            credentials = self.flow.step2_exchange(code, http=http)
+            credentials = self.flow.step2_exchange(code=code, http=http)
 
     def test_exchange_id_token_fail(self):
         payload = (b'{'
@@ -1335,7 +2058,7 @@ class OAuth2WebServerFlowTest(unittest2.TestCase):
         http = HttpMockSequence([({'status': '200'}, payload)])
 
         self.assertRaises(VerifyJwtTokenError, self.flow.step2_exchange,
-                          'some random code', http=http)
+                          code='some random code', http=http)
 
     def test_exchange_id_token(self):
         body = {'foo': 'bar'}
@@ -1350,7 +2073,8 @@ class OAuth2WebServerFlowTest(unittest2.TestCase):
                    b'  "id_token": "' + jwt + b'"'
                    b'}')
         http = HttpMockSequence([({'status': '200'}, payload)])
-        credentials = self.flow.step2_exchange('some random code', http=http)
+        credentials = self.flow.step2_exchange(code='some random code',
+                                               http=http)
         self.assertEqual(credentials.id_token, body)
 
 
@@ -1363,6 +2087,82 @@ class FlowFromCachedClientsecrets(unittest2.TestCase):
         flow = flow_from_clientsecrets(
             'some_secrets', '', redirect_uri='oob', cache=cache_mock)
         self.assertEqual('foo_client_secret', flow.client_secret)
+
+    @mock.patch('oauth2client.clientsecrets.loadfile')
+    def _flow_from_clientsecrets_success_helper(self, loadfile_mock,
+                                                device_uri=None,
+                                                revoke_uri=None):
+        client_type = TYPE_WEB
+        client_info = {
+            'auth_uri': 'auth_uri',
+            'token_uri': 'token_uri',
+            'client_id': 'client_id',
+            'client_secret': 'client_secret',
+        }
+        if revoke_uri is not None:
+            client_info['revoke_uri'] = revoke_uri
+        loadfile_mock.return_value = client_type, client_info
+        filename = object()
+        scope = ['baz']
+        cache = object()
+
+        if device_uri is not None:
+            result = flow_from_clientsecrets(filename, scope, cache=cache,
+                                             device_uri=device_uri)
+            self.assertEqual(result.device_uri, device_uri)
+        else:
+            result = flow_from_clientsecrets(filename, scope, cache=cache)
+
+        self.assertIsInstance(result, OAuth2WebServerFlow)
+        loadfile_mock.assert_called_once_with(filename, cache=cache)
+
+    def test_flow_from_clientsecrets_success(self):
+        self._flow_from_clientsecrets_success_helper()
+
+    def test_flow_from_clientsecrets_success_w_device_uri(self):
+        device_uri = 'http://device.uri'
+        self._flow_from_clientsecrets_success_helper(device_uri=device_uri)
+
+    def test_flow_from_clientsecrets_success_w_revoke_uri(self):
+        revoke_uri = 'http://revoke.uri'
+        self._flow_from_clientsecrets_success_helper(revoke_uri=revoke_uri)
+
+    @mock.patch('oauth2client.clientsecrets.loadfile',
+                side_effect=InvalidClientSecretsError)
+    def test_flow_from_clientsecrets_invalid(self, loadfile_mock):
+        filename = object()
+        cache = object()
+        with self.assertRaises(InvalidClientSecretsError):
+            flow_from_clientsecrets(filename, None, cache=cache,
+                                    message=None)
+        loadfile_mock.assert_called_once_with(filename, cache=cache)
+
+    @mock.patch('oauth2client.clientsecrets.loadfile',
+                side_effect=InvalidClientSecretsError)
+    @mock.patch('sys.exit')
+    def test_flow_from_clientsecrets_invalid_w_msg(self, sys_exit,
+                                                   loadfile_mock):
+        filename = object()
+        cache = object()
+        message = 'hi mom'
+
+        flow_from_clientsecrets(filename, None, cache=cache, message=message)
+        sys_exit.assert_called_once_with(message)
+        loadfile_mock.assert_called_once_with(filename, cache=cache)
+
+    @mock.patch('oauth2client.clientsecrets.loadfile')
+    def test_flow_from_clientsecrets_unknown_flow(self, loadfile_mock):
+        client_type = 'UNKNOWN'
+        loadfile_mock.return_value = client_type, None
+        filename = object()
+        cache = object()
+
+        err_msg = 'This OAuth 2.0 flow is unsupported: %r' % (client_type,)
+        with self.assertRaisesRegexp(client.UnknownClientSecretsFlowError,
+                                     err_msg):
+            flow_from_clientsecrets(filename, None, cache=cache)
+
+        loadfile_mock.assert_called_once_with(filename, cache=cache)
 
 
 class CredentialsFromCodeTests(unittest2.TestCase):
@@ -1465,18 +2265,109 @@ class Test__save_private_file(unittest2.TestCase):
         self.assertEqual(stat_mode, 0o600)
 
     def test_new(self):
-        import tempfile
         filename = tempfile.mktemp()
         self.assertFalse(os.path.exists(filename))
         self._save_helper(filename)
 
     def test_existing(self):
-        import tempfile
         filename = tempfile.mktemp()
         with open(filename, 'w') as f:
             f.write('a bunch of nonsense longer than []')
         self.assertTrue(os.path.exists(filename))
         self._save_helper(filename)
+
+
+class Test__get_application_default_credential_GAE(unittest2.TestCase):
+
+    @mock.patch.dict('sys.modules', {
+        'oauth2client.contrib.appengine': mock.Mock()})
+    def test_it(self):
+        gae_mod = sys.modules['oauth2client.contrib.appengine']
+        gae_mod.AppAssertionCredentials = creds_kls = mock.Mock()
+        creds_kls.return_value = object()
+        credentials = client._get_application_default_credential_GAE()
+        self.assertEqual(credentials, creds_kls.return_value)
+        creds_kls.assert_called_once_with([])
+
+
+class Test__get_application_default_credential_GCE(unittest2.TestCase):
+
+    @mock.patch.dict('sys.modules', {
+        'oauth2client.contrib.gce': mock.Mock()})
+    def test_it(self):
+        gce_mod = sys.modules['oauth2client.contrib.gce']
+        gce_mod.AppAssertionCredentials = creds_kls = mock.Mock()
+        creds_kls.return_value = object()
+        credentials = client._get_application_default_credential_GCE()
+        self.assertEqual(credentials, creds_kls.return_value)
+        creds_kls.assert_called_once_with()
+
+
+class Test__require_crypto_or_die(unittest2.TestCase):
+
+    @mock.patch.object(client, 'HAS_CRYPTO', new=True)
+    def test_with_crypto(self):
+        self.assertIsNone(client._require_crypto_or_die())
+
+    @mock.patch.object(client, 'HAS_CRYPTO', new=False)
+    def test_without_crypto(self):
+        with self.assertRaises(client.CryptoUnavailableError):
+            client._require_crypto_or_die()
+
+
+class TestDeviceFlowInfo(unittest2.TestCase):
+
+    DEVICE_CODE = 'e80ff179-fd65-416c-9dbf-56a23e5d23e4'
+    USER_CODE = '4bbd8b82-fc73-11e5-adf3-00c2c63e5792'
+    VER_URL = 'http://foo.bar'
+
+    def test_FromResponse(self):
+        response = {
+            'device_code': self.DEVICE_CODE,
+            'user_code': self.USER_CODE,
+            'verification_url': self.VER_URL,
+        }
+        result = DeviceFlowInfo.FromResponse(response)
+        expected_result = DeviceFlowInfo(self.DEVICE_CODE, self.USER_CODE,
+                                         None, self.VER_URL, None)
+        self.assertEqual(result, expected_result)
+
+    def test_FromResponse_fallback_to_uri(self):
+        response = {
+            'device_code': self.DEVICE_CODE,
+            'user_code': self.USER_CODE,
+            'verification_uri': self.VER_URL,
+        }
+        result = DeviceFlowInfo.FromResponse(response)
+        expected_result = DeviceFlowInfo(self.DEVICE_CODE, self.USER_CODE,
+                                         None, self.VER_URL, None)
+        self.assertEqual(result, expected_result)
+
+    def test_FromResponse_missing_url(self):
+        response = {
+            'device_code': self.DEVICE_CODE,
+            'user_code': self.USER_CODE,
+        }
+        with self.assertRaises(client.OAuth2DeviceCodeError):
+            DeviceFlowInfo.FromResponse(response)
+
+    @mock.patch('oauth2client.client._UTCNOW')
+    def test_FromResponse_with_expires_in(self, utcnow):
+        expires_in = 23
+        response = {
+            'device_code': self.DEVICE_CODE,
+            'user_code': self.USER_CODE,
+            'verification_url': self.VER_URL,
+            'expires_in': expires_in,
+        }
+        now = datetime.datetime(1999, 1, 1, 12, 30, 27)
+        expire = datetime.datetime(1999, 1, 1, 12, 30, 27 + expires_in)
+        utcnow.return_value = now
+
+        result = DeviceFlowInfo.FromResponse(response)
+        expected_result = DeviceFlowInfo(self.DEVICE_CODE, self.USER_CODE,
+                                         None, self.VER_URL, expire)
+        self.assertEqual(result, expected_result)
 
 
 if __name__ == '__main__':  # pragma: NO COVER

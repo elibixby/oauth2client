@@ -21,6 +21,8 @@ import stat
 import tempfile
 import unittest2
 
+import mock
+
 from oauth2client import util
 from oauth2client.client import OAuth2Credentials
 from oauth2client.contrib import locked_file
@@ -32,14 +34,15 @@ os.close(_filehandle)
 
 class _MockLockedFile(object):
 
-    def __init__(self, filename_str, error_code):
+    def __init__(self, filename_str, error_class, error_code):
         self.filename_str = filename_str
+        self.error_class = error_class
         self.error_code = error_code
         self.open_and_lock_called = False
 
     def open_and_lock(self):
         self.open_and_lock_called = True
-        raise IOError(self.error_code, '')
+        raise self.error_class(self.error_code, '')
 
     def is_locked(self):
         return False
@@ -108,11 +111,25 @@ class MultistoreFileTests(unittest2.TestCase):
         try:
             for error_code in (errno.EDEADLK, errno.ENOSYS, errno.ENOLCK,
                                errno.EACCES):
-                multistore = multistore_file._MultiStore(filename)
-                multistore._file = _MockLockedFile(filename, error_code)
-                # Should not raise even though the underlying file class did.
-                multistore._lock()
-                self.assertTrue(multistore._file.open_and_lock_called)
+                for error_class in (IOError, OSError):
+                    multistore = multistore_file._MultiStore(filename)
+                    multistore._file = _MockLockedFile(
+                        filename, error_class, error_code)
+                    # Should not raise though the underlying file class did.
+                    multistore._lock()
+                    self.assertTrue(multistore._file.open_and_lock_called)
+        finally:
+            os.unlink(filename)
+
+    def test_lock_file_raise_unexpected_error(self):
+        filehandle, filename = tempfile.mkstemp()
+        os.close(filehandle)
+
+        try:
+            multistore = multistore_file._MultiStore(filename)
+            multistore._file = _MockLockedFile(filename, IOError, errno.EBUSY)
+            self.assertRaises(IOError, multistore._lock)
+            self.assertTrue(multistore._file.open_and_lock_called)
         finally:
             os.unlink(filename)
 
@@ -132,6 +149,32 @@ class MultistoreFileTests(unittest2.TestCase):
         if os.name == 'posix':  # pragma: NO COVER
             self.assertTrue(store._multistore._read_only)
         os.chmod(FILENAME, 0o600)
+
+    def test_read_only_file_fail_lock_no_warning(self):
+        open(FILENAME, 'a+b').close()
+        os.chmod(FILENAME, 0o400)
+
+        multistore = multistore_file._MultiStore(FILENAME)
+
+        with mock.patch.object(multistore_file.logger, 'warn') as mock_warn:
+            multistore._warn_on_readonly = False
+            multistore._lock()
+            self.assertFalse(mock_warn.called)
+
+    def test_lock_skip_refresh(self):
+        with open(FILENAME, 'w') as f:
+            f.write('123')
+        os.chmod(FILENAME, 0o400)
+
+        multistore = multistore_file._MultiStore(FILENAME)
+
+        refresh_patch = mock.patch.object(
+            multistore, '_refresh_data_cache')
+
+        with refresh_patch as refresh_mock:
+            multistore._data = {}
+            multistore._lock()
+            self.assertFalse(refresh_mock.called)
 
     @unittest2.skipIf(not hasattr(os, 'symlink'), 'No symlink available')
     def test_multistore_no_symbolic_link_files(self):
@@ -168,12 +211,14 @@ class MultistoreFileTests(unittest2.TestCase):
             credentials.user_agent,
             ['some-scope', 'some-other-scope'])
 
+        # Save credentials
         store.put(credentials)
         credentials = store.get()
 
         self.assertNotEquals(None, credentials)
         self.assertEquals('foo', credentials.access_token)
 
+        # Delete credentials
         store.delete()
         credentials = store.get()
 
@@ -281,6 +326,61 @@ class MultistoreFileTests(unittest2.TestCase):
         store2.delete()
         keys = multistore_file.get_all_credential_keys(FILENAME)
         self.assertEquals([], keys)
+
+    def _refresh_data_cache_helper(self):
+        multistore = multistore_file._MultiStore(FILENAME)
+        json_patch = mock.patch.object(multistore, '_locked_json_read')
+
+        return multistore, json_patch
+
+    def test__refresh_data_cache_bad_json(self):
+        multistore, json_patch = self._refresh_data_cache_helper()
+
+        with json_patch as json_mock:
+            json_mock.side_effect = ValueError('')
+            multistore._refresh_data_cache()
+            self.assertTrue(json_mock.called)
+            self.assertEqual(multistore._data, {})
+
+    def test__refresh_data_cache_bad_version(self):
+        multistore, json_patch = self._refresh_data_cache_helper()
+
+        with json_patch as json_mock:
+            json_mock.return_value = {}
+            multistore._refresh_data_cache()
+            self.assertTrue(json_mock.called)
+            self.assertEqual(multistore._data, {})
+
+    def test__refresh_data_cache_newer_version(self):
+        multistore, json_patch = self._refresh_data_cache_helper()
+
+        with json_patch as json_mock:
+            json_mock.return_value = {'file_version': 5}
+            self.assertRaises(
+                multistore_file.NewerCredentialStoreError,
+                multistore._refresh_data_cache)
+            self.assertTrue(json_mock.called)
+
+    def test__refresh_data_cache_bad_credentials(self):
+        multistore, json_patch = self._refresh_data_cache_helper()
+
+        with json_patch as json_mock:
+            json_mock.return_value = {
+                'file_version': 1,
+                'data': [
+                    {'lol': 'this is a bad credential object.'}
+                ]}
+            multistore._refresh_data_cache()
+            self.assertTrue(json_mock.called)
+            self.assertEqual(multistore._data, {})
+
+    def test__delete_credential_nonexistent(self):
+        multistore = multistore_file._MultiStore(FILENAME)
+
+        with mock.patch.object(multistore, '_write') as write_mock:
+            multistore._data = {}
+            multistore._delete_credential('nonexistent_key')
+            self.assertTrue(write_mock.called)
 
 
 if __name__ == '__main__':  # pragma: NO COVER

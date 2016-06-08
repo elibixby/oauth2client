@@ -23,13 +23,17 @@ import os
 import rsa
 import tempfile
 
+import httplib2
 import mock
 import unittest2
 
 from .http_mock import HttpMockSequence
 from oauth2client import crypt
+from oauth2client.service_account import _JWTAccessCredentials
 from oauth2client.service_account import ServiceAccountCredentials
 from oauth2client.service_account import SERVICE_ACCOUNT
+
+from six import BytesIO
 
 
 def data_filename(filename):
@@ -94,14 +98,16 @@ class ServiceAccountCredentialsTests(unittest2.TestCase):
                          self.credentials.service_account_email)
 
     @staticmethod
-    def _from_json_keyfile_name_helper(payload, scopes=None):
+    def _from_json_keyfile_name_helper(payload, scopes=None,
+                                       token_uri=None, revoke_uri=None):
         filehandle, filename = tempfile.mkstemp()
         os.close(filehandle)
         try:
             with open(filename, 'w') as file_obj:
                 json.dump(payload, file_obj)
             return ServiceAccountCredentials.from_json_keyfile_name(
-                filename, scopes=scopes)
+                filename, scopes=scopes, token_uri=token_uri,
+                revoke_uri=revoke_uri)
         finally:
             os.remove(filename)
 
@@ -120,16 +126,26 @@ class ServiceAccountCredentialsTests(unittest2.TestCase):
             'private_key': private_key,
         }
         scopes = ['foo', 'bar']
-        creds = self._from_json_keyfile_name_helper(payload, scopes=scopes)
-        self.assertIsInstance(creds, ServiceAccountCredentials)
-        self.assertEqual(creds.client_id, client_id)
-        self.assertEqual(creds._service_account_email, client_email)
-        self.assertEqual(creds._private_key_id, private_key_id)
-        self.assertEqual(creds._private_key_pkcs8_pem, private_key)
-        self.assertEqual(creds._scopes, ' '.join(scopes))
-        # Check stub.
-        self.assertEqual(creds._signer, signer_factory.return_value)
+        token_uri = 'baz'
+        revoke_uri = 'qux'
+        base_creds = self._from_json_keyfile_name_helper(
+            payload, scopes=scopes, token_uri=token_uri, revoke_uri=revoke_uri)
+        self.assertEqual(base_creds._signer, signer_factory.return_value)
         signer_factory.assert_called_once_with(private_key)
+
+        payload['token_uri'] = token_uri
+        payload['revoke_uri'] = revoke_uri
+        creds_with_uris_from_file = self._from_json_keyfile_name_helper(
+            payload, scopes=scopes)
+        for creds in (base_creds, creds_with_uris_from_file):
+            self.assertIsInstance(creds, ServiceAccountCredentials)
+            self.assertEqual(creds.client_id, client_id)
+            self.assertEqual(creds._service_account_email, client_email)
+            self.assertEqual(creds._private_key_id, private_key_id)
+            self.assertEqual(creds._private_key_pkcs8_pem, private_key)
+            self.assertEqual(creds._scopes, ' '.join(scopes))
+            self.assertEqual(creds.token_uri, token_uri)
+            self.assertEqual(creds.revoke_uri, revoke_uri)
 
     def test_from_json_keyfile_name_factory_bad_type(self):
         type_ = 'bad-type'
@@ -146,24 +162,33 @@ class ServiceAccountCredentialsTests(unittest2.TestCase):
         with self.assertRaises(KeyError):
             self._from_json_keyfile_name_helper(payload)
 
-    def _from_p12_keyfile_helper(self, private_key_password=None, scopes=''):
+    def _from_p12_keyfile_helper(self, private_key_password=None, scopes='',
+                                 token_uri=None, revoke_uri=None):
         service_account_email = 'name@email.com'
         filename = data_filename('privatekey.p12')
         with open(filename, 'rb') as file_obj:
             key_contents = file_obj.read()
-        creds = ServiceAccountCredentials.from_p12_keyfile(
+        creds_from_filename = ServiceAccountCredentials.from_p12_keyfile(
             service_account_email, filename,
             private_key_password=private_key_password,
-            scopes=scopes)
-        self.assertIsInstance(creds, ServiceAccountCredentials)
-        self.assertIsNone(creds.client_id)
-        self.assertEqual(creds._service_account_email, service_account_email)
-        self.assertIsNone(creds._private_key_id)
-        self.assertIsNone(creds._private_key_pkcs8_pem)
-        self.assertEqual(creds._private_key_pkcs12, key_contents)
-        if private_key_password is not None:
-            self.assertEqual(creds._private_key_password, private_key_password)
-        self.assertEqual(creds._scopes, ' '.join(scopes))
+            scopes=scopes, token_uri=token_uri, revoke_uri=revoke_uri)
+        creds_from_file_contents = (
+            ServiceAccountCredentials.from_p12_keyfile_buffer(
+                service_account_email, BytesIO(key_contents),
+                private_key_password=private_key_password,
+                scopes=scopes, token_uri=token_uri, revoke_uri=revoke_uri))
+        for creds in (creds_from_filename, creds_from_file_contents):
+            self.assertIsInstance(creds, ServiceAccountCredentials)
+            self.assertIsNone(creds.client_id)
+            self.assertEqual(creds._service_account_email, service_account_email)
+            self.assertIsNone(creds._private_key_id)
+            self.assertIsNone(creds._private_key_pkcs8_pem)
+            self.assertEqual(creds._private_key_pkcs12, key_contents)
+            if private_key_password is not None:
+                self.assertEqual(creds._private_key_password, private_key_password)
+            self.assertEqual(creds._scopes, ' '.join(scopes))
+            self.assertEqual(creds.token_uri, token_uri)
+            self.assertEqual(creds.revoke_uri, revoke_uri)
 
     def _p12_not_implemented_helper(self):
         service_account_email = 'name@email.com'
@@ -186,31 +211,8 @@ class ServiceAccountCredentialsTests(unittest2.TestCase):
     def test_from_p12_keyfile_explicit(self):
         password = 'notasecret'
         self._from_p12_keyfile_helper(private_key_password=password,
-                                      scopes=['foo', 'bar'])
-
-    def test_from_p12_keyfile_buffer(self):
-        service_account_email = 'name@email.com'
-        filename = data_filename('privatekey.p12')
-        private_key_password = 'notasecret'
-        scopes = ['foo', 'bar']
-        with open(filename, 'rb') as file_obj:
-            key_contents = file_obj.read()
-            # Seek back to the beginning so the buffer can be
-            # passed to the constructor.
-            file_obj.seek(0)
-            creds = ServiceAccountCredentials.from_p12_keyfile_buffer(
-                service_account_email, file_obj,
-                private_key_password=private_key_password,
-                scopes=scopes)
-        # Check the created object.
-        self.assertIsInstance(creds, ServiceAccountCredentials)
-        self.assertIsNone(creds.client_id)
-        self.assertEqual(creds._service_account_email, service_account_email)
-        self.assertIsNone(creds._private_key_id)
-        self.assertIsNone(creds._private_key_pkcs8_pem)
-        self.assertEqual(creds._private_key_pkcs12, key_contents)
-        self.assertEqual(creds._private_key_password, private_key_password)
-        self.assertEqual(creds._scopes, ' '.join(scopes))
+                                      scopes=['foo', 'bar'],
+                                      token_uri='baz', revoke_uri='qux')
 
     def test_create_scoped_required_without_scopes(self):
         self.assertTrue(self.credentials.create_scoped_required())
@@ -354,6 +356,232 @@ class ServiceAccountCredentialsTests(unittest2.TestCase):
 
         self.assertEqual(credentials.access_token, token2)
 
+TOKEN_LIFE = _JWTAccessCredentials._MAX_TOKEN_LIFETIME_SECS
+T1 = 42
+T1_DATE = datetime.datetime(1970, 1, 1, second=T1)
+T1_EXPIRY = T1 + TOKEN_LIFE
+T1_EXPIRY_DATE = T1_DATE + datetime.timedelta(seconds=TOKEN_LIFE)
+
+T2 = T1 + 100
+T2_DATE = T1_DATE + datetime.timedelta(seconds=100)
+T2_EXPIRY = T2 + TOKEN_LIFE
+T2_EXPIRY_DATE = T2_DATE + datetime.timedelta(seconds=TOKEN_LIFE)
+
+T3 = T1 + TOKEN_LIFE + 1
+T3_DATE = T1_DATE + datetime.timedelta(seconds=TOKEN_LIFE + 1)
+T3_EXPIRY = T3 + TOKEN_LIFE
+T3_EXPIRY_DATE = T3_DATE + datetime.timedelta(seconds=TOKEN_LIFE)
+
+
+class JWTAccessCredentialsTests(unittest2.TestCase):
+
+    def setUp(self):
+        self.client_id = '123'
+        self.service_account_email = 'dummy@google.com'
+        self.private_key_id = 'ABCDEF'
+        self.private_key = datafile('pem_from_pkcs12.pem')
+        self.signer = crypt.Signer.from_string(self.private_key)
+        self.url = 'https://test.url.com'
+        self.jwt = _JWTAccessCredentials(self.service_account_email,
+                                         self.signer,
+                                         private_key_id=self.private_key_id,
+                                         client_id=self.client_id,
+                                         additional_claims={'aud': self.url})
+
+    @mock.patch('oauth2client.service_account._UTCNOW')
+    @mock.patch('oauth2client.client._UTCNOW')
+    @mock.patch('time.time')
+    def test_get_access_token_no_claims(self, time, client_utcnow, utcnow):
+        utcnow.return_value = T1_DATE
+        client_utcnow.return_value = T1_DATE
+        time.return_value = T1
+
+        token_info = self.jwt.get_access_token()
+        payload = crypt.verify_signed_jwt_with_certs(
+            token_info.access_token,
+            {'key': datafile('public_cert.pem')}, audience=self.url)
+        self.assertEqual(payload['iss'], self.service_account_email)
+        self.assertEqual(payload['sub'], self.service_account_email)
+        self.assertEqual(payload['iat'], T1)
+        self.assertEqual(payload['exp'], T1_EXPIRY)
+        self.assertEqual(token_info.expires_in, T1_EXPIRY - T1)
+
+        # Verify that we vend the same token after 100 seconds
+        utcnow.return_value = T2_DATE
+        client_utcnow.return_value = T2_DATE
+        token_info = self.jwt.get_access_token()
+        payload = crypt.verify_signed_jwt_with_certs(
+            token_info.access_token,
+            {'key': datafile('public_cert.pem')}, audience=self.url)
+        self.assertEqual(payload['iat'], T1)
+        self.assertEqual(payload['exp'], T1_EXPIRY)
+        self.assertEqual(token_info.expires_in, T1_EXPIRY - T2)
+
+        # Verify that we vend a new token after _MAX_TOKEN_LIFETIME_SECS
+        utcnow.return_value = T3_DATE
+        client_utcnow.return_value = T3_DATE
+        time.return_value = T3
+        token_info = self.jwt.get_access_token()
+        payload = crypt.verify_signed_jwt_with_certs(
+            token_info.access_token,
+            {'key': datafile('public_cert.pem')}, audience=self.url)
+        expires_in = token_info.expires_in
+        self.assertEqual(payload['iat'], T3)
+        self.assertEqual(payload['exp'], T3_EXPIRY)
+        self.assertEqual(expires_in, T3_EXPIRY - T3)
+
+    @mock.patch('oauth2client.service_account._UTCNOW')
+    @mock.patch('time.time')
+    def test_get_access_token_additional_claims(self, time, utcnow):
+        utcnow.return_value = T1_DATE
+        time.return_value = T1
+
+        token_info = self.jwt.get_access_token(additional_claims=
+                                               {'aud': 'https://test2.url.com',
+                                                'sub': 'dummy2@google.com'
+                                               })
+        payload = crypt.verify_signed_jwt_with_certs(
+            token_info.access_token,
+            {'key' : datafile('public_cert.pem')}, 
+            audience='https://test2.url.com')
+        expires_in = token_info.expires_in
+        self.assertEqual(payload['iss'], self.service_account_email)
+        self.assertEqual(payload['sub'], 'dummy2@google.com')
+        self.assertEqual(payload['iat'], T1)
+        self.assertEqual(payload['exp'], T1_EXPIRY)
+        self.assertEqual(expires_in, T1_EXPIRY - T1)
+ 
+    def test_revoke(self):
+        self.jwt.revoke(None)
+     
+    def test_create_scoped_required(self):
+        self.assertTrue(self.jwt.create_scoped_required())
+    
+    def test_create_scoped(self):
+        self.jwt._private_key_pkcs12 = ''
+        self.jwt._private_key_password = ''
+
+        new_credentials = self.jwt.create_scoped('dummy_scope')
+        self.assertNotEqual(self.jwt, new_credentials)
+        self.assertIsInstance(new_credentials, ServiceAccountCredentials)
+        self.assertEqual('dummy_scope', new_credentials._scopes)
+    
+    @mock.patch('oauth2client.service_account._UTCNOW')
+    @mock.patch('oauth2client.client._UTCNOW')
+    @mock.patch('time.time')
+    def test_authorize_success(self, time, client_utcnow, utcnow):
+        utcnow.return_value = T1_DATE
+        client_utcnow.return_value = T1_DATE
+        time.return_value = T1
+
+        def mock_request(uri, method='GET', body=None, headers=None,
+                         redirections=0, connection_type=None):
+            self.assertEqual(uri, self.url)
+            bearer, token = headers[b'Authorization'].split()
+            payload = crypt.verify_signed_jwt_with_certs(
+                token,
+                {'key': datafile('public_cert.pem')}, 
+                audience=self.url)
+            self.assertEqual(payload['iss'], self.service_account_email)
+            self.assertEqual(payload['sub'], self.service_account_email)
+            self.assertEqual(payload['iat'], T1)
+            self.assertEqual(payload['exp'], T1_EXPIRY)
+            self.assertEqual(uri, self.url)
+            self.assertEqual(bearer, b'Bearer')
+            return (httplib2.Response({'status': '200'}), b'')
+
+        h = httplib2.Http()
+        h.request = mock_request
+        self.jwt.authorize(h)
+        h.request(self.url)
+
+        # Ensure we use the cached token
+        utcnow.return_value = T2_DATE
+        client_utcnow.return_value = T2_DATE
+        h.request(self.url)
+
+    @mock.patch('oauth2client.service_account._UTCNOW')
+    @mock.patch('oauth2client.client._UTCNOW')
+    @mock.patch('time.time')
+    def test_authorize_no_aud(self, time, client_utcnow, utcnow):
+        utcnow.return_value = T1_DATE
+        client_utcnow.return_value = T1_DATE
+        time.return_value = T1
+
+        jwt = _JWTAccessCredentials(self.service_account_email,
+                                    self.signer,
+                                    private_key_id=self.private_key_id,
+                                    client_id=self.client_id)
+
+        def mock_request(uri, method='GET', body=None, headers=None,
+                         redirections=0, connection_type=None):
+            self.assertEqual(uri, self.url)
+            bearer, token = headers[b'Authorization'].split()
+            payload = crypt.verify_signed_jwt_with_certs(
+                token,
+                {'key': datafile('public_cert.pem')},
+                audience=self.url)
+            self.assertEqual(payload['iss'], self.service_account_email)
+            self.assertEqual(payload['sub'], self.service_account_email)
+            self.assertEqual(payload['iat'], T1)
+            self.assertEqual(payload['exp'], T1_EXPIRY)
+            self.assertEqual(uri, self.url)
+            self.assertEqual(bearer, b'Bearer')
+            return (httplib2.Response({'status': '200'}), b'')
+
+        h = httplib2.Http()
+        h.request = mock_request
+        jwt.authorize(h)
+        h.request(self.url)
+
+        # Ensure we do not cache the token
+        self.assertIsNone(jwt.access_token)
+
+    @mock.patch('oauth2client.service_account._UTCNOW')
+    def test_authorize_stale_token(self, utcnow):
+        utcnow.return_value = T1_DATE
+        # Create an initial token
+        h = HttpMockSequence([({'status': '200'}, b''),
+                              ({'status': '200'}, b'')])
+        self.jwt.authorize(h)
+        h.request(self.url)
+        token_1 = self.jwt.access_token
+
+        # Expire the token
+        utcnow.return_value = T3_DATE
+        h.request(self.url)
+        token_2 = self.jwt.access_token
+        self.assertEquals(self.jwt.token_expiry, T3_EXPIRY_DATE)
+        self.assertNotEqual(token_1, token_2)
+
+    @mock.patch('oauth2client.service_account._UTCNOW')
+    def test_authorize_401(self, utcnow):
+        utcnow.return_value = T1_DATE
+
+        h = HttpMockSequence([
+            ({'status': '200'}, b''),
+            ({'status': '401'}, b''),
+            ({'status': '200'}, b'')])
+        self.jwt.authorize(h)
+        h.request(self.url)
+        token_1 = self.jwt.access_token
+
+        utcnow.return_value = T2_DATE
+        self.assertEquals(h.request(self.url)[0].status, 200)
+        token_2 = self.jwt.access_token
+        # Check the 401 forced a new token
+        self.assertNotEqual(token_1, token_2)
+
+    @mock.patch('oauth2client.service_account._UTCNOW')
+    def test_refresh(self, utcnow):
+        utcnow.return_value = T1_DATE
+        token_1 = self.jwt.access_token
+
+        utcnow.return_value = T2_DATE
+        self.jwt.refresh(None)
+        token_2 = self.jwt.access_token
+        self.assertEquals(self.jwt.token_expiry, T2_EXPIRY_DATE)
+        self.assertNotEqual(token_1, token_2)
 
 if __name__ == '__main__':  # pragma: NO COVER
     unittest2.main()

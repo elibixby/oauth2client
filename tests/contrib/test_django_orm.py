@@ -38,6 +38,8 @@ import django
 django.setup()
 from django.apps import AppConfig
 
+import mock
+
 
 class DjangoOrmTestApp(AppConfig):
     """App Config for Django Helper."""
@@ -63,7 +65,7 @@ class TestCredentialsField(unittest.TestCase):
     def setUp(self):
         self.fake_model = FakeCredentialsModel()
         self.fake_model_field = self.fake_model._meta.get_field('credentials')
-        self.field = CredentialsField()
+        self.field = CredentialsField(null=True)
         self.credentials = Credentials()
         self.pickle_str = _from_bytes(
             base64.b64encode(pickle.dumps(self.credentials)))
@@ -72,8 +74,20 @@ class TestCredentialsField(unittest.TestCase):
         self.assertEquals(self.field.get_internal_type(), 'TextField')
 
     def test_field_unpickled(self):
-        self.assertTrue(isinstance(self.field.to_python(self.pickle_str),
-                                   Credentials))
+        self.assertTrue(
+            isinstance(self.field.to_python(self.pickle_str), Credentials))
+
+    def test_field_already_unpickled(self):
+        self.assertTrue(isinstance(
+            self.field.to_python(self.credentials), Credentials))
+
+    def test_none_field_unpickled(self):
+        self.assertIsNone(self.field.to_python(None))
+
+    def test_from_db_value(self):
+        value = self.field.from_db_value(
+            self.pickle_str, None, None, None)
+        self.assertTrue(isinstance(value, Credentials))
 
     def test_field_unpickled_none(self):
         self.assertEqual(self.field.to_python(None), None)
@@ -93,6 +107,10 @@ class TestCredentialsField(unittest.TestCase):
         value_str = self.fake_model_field.value_to_string(self.fake_model)
         self.assertEqual(value_str, None)
 
+    def test_credentials_without_null(self):
+        credentials = CredentialsField()
+        self.assertTrue(credentials.null)
+
 
 class TestFlowField(unittest.TestCase):
 
@@ -102,7 +120,7 @@ class TestFlowField(unittest.TestCase):
     def setUp(self):
         self.fake_model = self.FakeFlowModel()
         self.fake_model_field = self.fake_model._meta.get_field('flow')
-        self.field = FlowField()
+        self.field = FlowField(null=True)
         self.flow = Flow()
         self.pickle_str = _from_bytes(
             base64.b64encode(pickle.dumps(self.flow)))
@@ -112,6 +130,18 @@ class TestFlowField(unittest.TestCase):
 
     def test_field_unpickled(self):
         python_val = self.field.to_python(self.pickle_str)
+        self.assertTrue(isinstance(python_val, Flow))
+
+    def test_field_already_unpickled(self):
+        self.assertTrue(
+            isinstance(self.field.to_python(self.flow), Flow))
+
+    def test_none_field_unpickled(self):
+        self.assertIsNone(self.field.to_python(None))
+
+    def test_from_db_value(self):
+        python_val = self.field.from_db_value(
+            self.pickle_str, None, None, None)
         self.assertTrue(isinstance(python_val, Flow))
 
     def test_field_pickled(self):
@@ -128,6 +158,10 @@ class TestFlowField(unittest.TestCase):
         value_str = self.fake_model_field.value_to_string(self.fake_model)
         self.assertEqual(value_str, None)
 
+    def test_flow_with_null(self):
+        flow = FlowField()
+        self.assertTrue(flow.null)
+
 
 class TestStorage(unittest.TestCase):
 
@@ -138,25 +172,150 @@ class TestStorage(unittest.TestCase):
         refresh_token = '1/0/a.df219fjls0'
         token_expiry = datetime.datetime.utcnow()
         user_agent = 'refresh_checker/1.0'
+
         self.credentials = OAuth2Credentials(
             access_token, client_id, client_secret,
             refresh_token, token_expiry, GOOGLE_TOKEN_URI,
             user_agent)
 
+        self.key_name = 'id'
+        self.key_value = '1'
+        self.property_name = 'credentials'
+
     def test_constructor(self):
-        key_name = 'foo'
-        key_value = 'bar'
-        property_name = 'credentials'
-        storage = Storage(FakeCredentialsModel, key_name,
-                          key_value, property_name)
+        storage = Storage(FakeCredentialsModel, self.key_name,
+                          self.key_value, self.property_name)
 
         self.assertEqual(storage.model_class, FakeCredentialsModel)
-        self.assertEqual(storage.key_name, key_name)
-        self.assertEqual(storage.key_value, key_value)
-        self.assertEqual(storage.property_name, property_name)
+        self.assertEqual(storage.key_name, self.key_name)
+        self.assertEqual(storage.key_value, self.key_value)
+        self.assertEqual(storage.property_name, self.property_name)
+
+    @mock.patch('django.db.models')
+    def test_locked_get(self, djangoModel):
+        fake_model_with_credentials = FakeCredentialsModelMock()
+        entities = [
+            fake_model_with_credentials
+        ]
+        filter_mock = mock.Mock(return_value=entities)
+        object_mock = mock.Mock()
+        object_mock.filter = filter_mock
+        FakeCredentialsModelMock.objects = object_mock
+
+        storage = Storage(FakeCredentialsModelMock, self.key_name,
+                          self.key_value, self.property_name)
+        credential = storage.locked_get()
+        self.assertEqual(
+            credential, fake_model_with_credentials.credentials)
+
+    @mock.patch('django.db.models')
+    def test_locked_get_no_entities(self, djangoModel):
+        entities = [
+        ]
+        filter_mock = mock.Mock(return_value=entities)
+        object_mock = mock.Mock()
+        object_mock.filter = filter_mock
+        FakeCredentialsModelMock.objects = object_mock
+
+        storage = Storage(FakeCredentialsModelMock, self.key_name,
+                          self.key_value, self.property_name)
+        credential = storage.locked_get()
+        self.assertIsNone(credential)
+
+    @mock.patch('django.db.models')
+    def test_locked_get_no_set_store(self, djangoModel):
+        fake_model_with_credentials = FakeCredentialsModelMockNoSet()
+        entities = [
+            fake_model_with_credentials
+        ]
+        filter_mock = mock.Mock(return_value=entities)
+        object_mock = mock.Mock()
+        object_mock.filter = filter_mock
+        FakeCredentialsModelMockNoSet.objects = object_mock
+
+        storage = Storage(FakeCredentialsModelMockNoSet, self.key_name,
+                          self.key_value, self.property_name)
+        credential = storage.locked_get()
+        self.assertEqual(
+            credential, fake_model_with_credentials.credentials)
+
+    @mock.patch('django.db.models')
+    def test_locked_put(self, djangoModel):
+        storage = Storage(FakeCredentialsModelMock, self.key_name,
+                          self.key_value, self.property_name)
+        storage.locked_put(self.credentials)
+
+    @mock.patch('django.db.models')
+    def test_locked_put_with_overwite(self, djangoModel):
+        get_or_create_mock = mock.Mock()
+        fake_credentials = FakeCredentialsModelMock()
+        get_or_create_mock.return_value = (fake_credentials, True)
+
+        object_mock = mock.Mock()
+        object_mock.get_or_create = get_or_create_mock
+        FakeCredentialsModelMock.objects.get_or_create = get_or_create_mock
+
+        storage = Storage(FakeCredentialsModelMock, self.key_name,
+                          self.key_value, self.property_name)
+        storage.locked_put(self.credentials, True)
+        self.assertTrue(fake_credentials.saved)
+
+    @mock.patch('django.db.models')
+    def test_locked_delete(self, djangoModel):
+
+        class FakeEntities(object):
+            def __init__(self):
+                self.deleted = False
+
+            def delete(self):
+                self.deleted = True
+
+        fake_entities = FakeEntities()
+        entities = fake_entities
+
+        filter_mock = mock.Mock(return_value=entities)
+        object_mock = mock.Mock()
+        object_mock.filter = filter_mock
+        FakeCredentialsModelMock.objects = object_mock
+        storage = Storage(FakeCredentialsModelMock, self.key_name,
+                          self.key_value, self.property_name)
+        storage.locked_delete()
+        self.assertTrue(fake_entities.deleted)
+
+
+class CredentialWithSetStore(CredentialsField):
+
+    def __init__(self):
+        self.model = CredentialWithSetStore
+
+    def set_store(self, storage):
+        pass
 
 
 class FakeCredentialsModel(models.Model):
+    credentials = CredentialsField()
+
+
+class FakeCredentialsModelMock(object):
+
+    def __init__(self, *args, **kwargs):
+        self.model = FakeCredentialsModelMock
+        self.saved = False
+        self.deleted = False
+
+    def save(self):
+        self.saved = True
+
+    credentials = CredentialWithSetStore()
+
+
+class FakeCredentialsModelMockNoSet(object):
+
+    def __init__(self, set_store=False, *args, **kwargs):
+        self.model = FakeCredentialsModelMock
+        self.saved = False
+        self.deleted = False
+
     credentials = CredentialsField()
 
 
