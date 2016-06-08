@@ -53,7 +53,7 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         self.assertEqual(credentials.access_token,
                          credentials_from_json.access_token)
 
-    @mock.patch('oauth2client.contrib.metadata.get_access_token',
+    @mock.patch('oauth2client.contrib.metadata.get_token',
                 return_value=mock.Mock(
                     side_effect=[('A', 0), ('B', datetime.datetime.max)]))
     def test_refresh_token(self, metadata):

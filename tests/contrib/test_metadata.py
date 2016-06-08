@@ -30,37 +30,20 @@ EXPECTED_ARGS = ['http://metadata.google.internal/computeMetadata/v1/a/b/?recurs
 EXPECTED_KWARGS = metadata.METADATA_HEADERS
 
 
-def get_json_request_mock():
+def request_mock(status, content_type, content):
     return mock.MagicMock(return_value=(
         httplib2.Response(
-            {'status': http_client.OK, 'content-type': 'application/json'}
+            {'status': status, 'content-type': content_type}
         ),
-        json.dumps(DATA).encode('utf-8')
-    ))
-
-
-def get_string_request_mock():
-    return mock.MagicMock(return_value=(
-        httplib2.Response(
-            {'status': http_client.OK, 'content-type': 'text/html'}
-        ),
-        '<p>Hello World!</p>'.encode('utf-8')
-    ))
-
-
-def get_error_request_mock():
-    return mock.MagicMock(return_value=(
-        httplib2.Response(
-            {'status': http_client.NOT_FOUND, 'content-type': 'text/html'}
-        ),
-        '<p>Error</p>'.encode('utf-8')
+        content.encode('utf-8')
     ))
 
 
 class TestMetadata(unittest2.TestCase):
 
     def test_get_success_json(self):
-        http_request = get_json_request_mock()
+        http_request = request_mock(
+            http_client.OK, 'application/json', json.dumps(DATA))
         self.assertEqual(
             metadata.get(PATH, http_request=http_request),
             DATA
@@ -69,7 +52,8 @@ class TestMetadata(unittest2.TestCase):
             )
 
     def test_get_success_string(self):
-        http_request = get_string_request_mock()
+        http_request = request_mock(
+            http_client.OK, 'text/html', '<p>Hello World!</p>')
         self.assertEqual(
             metadata.get(PATH, http_request=http_request),
             '<p>Hello World!</p>'
@@ -77,7 +61,8 @@ class TestMetadata(unittest2.TestCase):
         http_request.assert_called_once_with(*EXPECTED_ARGS, **EXPECTED_KWARGS)
 
     def test_get_failure(self):
-        http_request = get_error_request_mock()
+        http_request = request_mock(
+            http_client.NOT_FOUND, 'text/html', '<p>Error</p>')
         with self.assertRaises(httplib2.HttpLib2Error):
             metadata.get(PATH, http_request=http_request)
 
@@ -85,11 +70,10 @@ class TestMetadata(unittest2.TestCase):
 
     @mock.patch('oauth2client.client._UTCNOW', return_value=datetime.datetime.min)
     def test_get_token_success(self, now):
-        http_request = mock.MagicMock(
-            return_value=(
-                {'status': http_client.OK, 'content-type': 'application/json'},
-                json.dumps({'access_token': 'a', 'expires_in': 100}).encode('utf-8')
-            )
+        http_request = request_mock(
+            http_client.NOT_FOUND,
+            'application/json',
+            json.dumps({'access_token': 'a', 'expires_in': 100})
         )
         token, expiry = metadata.get_token(http_request=http_request)
         self.assertEqual(token, 'a')
@@ -101,11 +85,10 @@ class TestMetadata(unittest2.TestCase):
         now.assert_called_once_with()
 
     def test_get_token_failed_fetch(self):
-        http_request = mock.MagicMock(
-            return_value=(
-                {'status': http_client.NOT_FOUND, 'content-type': 'application/json'},
-                json.dumps({'access_token': 'a', 'expires_in': 100}).encode('utf-8')
-            )
+        http_request = request_mock(
+            http_client.NOT_FOUND,
+            'application/json',
+            json.dumps({'access_token': 'a', 'expires_in': 100})
         )
         with self.assertRaises(HttpAccessTokenRefreshError):
             metadata.get_token(http_request=http_request)
@@ -116,10 +99,10 @@ class TestMetadata(unittest2.TestCase):
         )
 
     def test_service_account_info(self):
-        http_request = get_json_request_mock()
+        http_request = request_mock(
+            http_client.OK, 'application/json', json.dumps(DATA))
         info = metadata.get_service_account_info(http_request=http_request)
         self.assertEqual(info, DATA)
-
         http_request.assert_called_once_with(
             'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/?recursive=true',
             **EXPECTED_KWARGS
