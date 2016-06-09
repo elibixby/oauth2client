@@ -15,15 +15,18 @@
 """Unit tests for oauth2client.contrib.gce."""
 
 import datetime
+import json
+import mock
 import unittest2
 
-import mock
+from six.moves import http_client
 
 from oauth2client.client import Credentials
 from oauth2client.client import save_to_well_known_file
+from oauth2client.client import HttpAccessTokenRefreshError
 from oauth2client.contrib.gce import _SCOPES_WARNING
 from oauth2client.contrib.gce import AppAssertionCredentials
-
+from tests.contrib.test_metadata import request_mock
 
 __author__ = 'jcgregorio@google.com (Joe Gregorio)'
 
@@ -53,7 +56,7 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         self.assertEqual(credentials.access_token,
                          credentials_from_json.access_token)
 
-    @mock.patch('oauth2client.contrib.metadata.get_token',
+    @mock.patch('oauth2client.contrib._metadata.get_token',
                 side_effect=[('A', datetime.datetime.min),
                              ('B', datetime.datetime.max)])
     def test_refresh_token(self, metadata):
@@ -65,6 +68,17 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         credentials.get_access_token()
         self.assertEqual(credentials.access_token, 'B')
         self.assertFalse(credentials.access_token_expired)
+
+    def test_refresh_token_failed_fetch(self):
+        http_request = request_mock(
+            http_client.NOT_FOUND,
+            'application/json',
+            json.dumps({'access_token': 'a', 'expires_in': 100})
+        )
+        credentials = AppAssertionCredentials()
+
+        with self.assertRaises(HttpAccessTokenRefreshError):
+            credentials._refresh(http_request=http_request)
 
     def test_serialization_data(self):
         credentials = AppAssertionCredentials()
@@ -95,7 +109,7 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         with self.assertRaises(NotImplementedError):
             credentials.sign_blob(b'blob')
 
-    @mock.patch('oauth2client.contrib.metadata.get_service_account_info',
+    @mock.patch('oauth2client.contrib._metadata.get_service_account_info',
                 return_value={'email': 'a@example.com'})
     def test_service_account_email(self, metadata):
         credentials = AppAssertionCredentials()

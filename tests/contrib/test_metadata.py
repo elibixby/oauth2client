@@ -22,12 +22,12 @@ import unittest2
 from six.moves import http_client
 
 from oauth2client.client import HttpAccessTokenRefreshError
-from oauth2client.contrib import metadata
+from oauth2client.contrib import _metadata
 
-PATH = ['a', 'b']
+PATH = ['instance', 'service-accounts', 'default']
 DATA = {'foo': 'bar'}
-EXPECTED_ARGS = ['http://metadata.google.internal/computeMetadata/v1/a/b/?recursive=true']
-EXPECTED_KWARGS = dict(headers=metadata.METADATA_HEADERS)
+EXPECTED_ARGS = ['http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default']
+EXPECTED_KWARGS = dict(headers=_metadata.METADATA_HEADERS)
 
 
 def request_mock(status, content_type, content):
@@ -45,7 +45,7 @@ class TestMetadata(unittest2.TestCase):
         http_request = request_mock(
             http_client.OK, 'application/json', json.dumps(DATA))
         self.assertEqual(
-            metadata.get(PATH, http_request=http_request),
+            _metadata.get(PATH, http_request=http_request),
             DATA
         )
         http_request.assert_called_once_with(*EXPECTED_ARGS, **EXPECTED_KWARGS)
@@ -54,7 +54,7 @@ class TestMetadata(unittest2.TestCase):
         http_request = request_mock(
             http_client.OK, 'text/html', '<p>Hello World!</p>')
         self.assertEqual(
-            metadata.get(PATH, http_request=http_request),
+            _metadata.get(PATH, http_request=http_request),
             '<p>Hello World!</p>'
         )
         http_request.assert_called_once_with(*EXPECTED_ARGS, **EXPECTED_KWARGS)
@@ -63,46 +63,32 @@ class TestMetadata(unittest2.TestCase):
         http_request = request_mock(
             http_client.NOT_FOUND, 'text/html', '<p>Error</p>')
         with self.assertRaises(httplib2.HttpLib2Error):
-            metadata.get(PATH, http_request=http_request)
+            _metadata.get(PATH, http_request=http_request)
 
         http_request.assert_called_once_with(*EXPECTED_ARGS, **EXPECTED_KWARGS)
 
-    @mock.patch('oauth2client.contrib.metadata._UTCNOW', return_value=datetime.datetime.min)
+    @mock.patch('oauth2client.contrib._metadata._UTCNOW', return_value=datetime.datetime.min)
     def test_get_token_success(self, now):
         http_request = request_mock(
             http_client.OK,
             'application/json',
             json.dumps({'access_token': 'a', 'expires_in': 100})
         )
-        token, expiry = metadata.get_token(http_request=http_request)
+        token, expiry = _metadata.get_token(http_request=http_request)
         self.assertEqual(token, 'a')
         self.assertEqual(expiry, datetime.datetime.min + datetime.timedelta(seconds=100))
         http_request.assert_called_once_with(
-            'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
+            EXPECTED_ARGS[0]+'/token',
             **EXPECTED_KWARGS
         )
         now.assert_called_once_with()
 
-    def test_get_token_failed_fetch(self):
-        http_request = request_mock(
-            http_client.NOT_FOUND,
-            'application/json',
-            json.dumps({'access_token': 'a', 'expires_in': 100})
-        )
-        with self.assertRaises(HttpAccessTokenRefreshError):
-            metadata.get_token(http_request=http_request)
-
-        http_request.assert_called_once_with(
-            'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
-            **EXPECTED_KWARGS
-        )
-
     def test_service_account_info(self):
         http_request = request_mock(
             http_client.OK, 'application/json', json.dumps(DATA))
-        info = metadata.get_service_account_info(http_request=http_request)
+        info = _metadata.get_service_account_info(http_request=http_request)
         self.assertEqual(info, DATA)
         http_request.assert_called_once_with(
-            'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/?recursive=true',
+            EXPECTED_ARGS[0]+'/?recursive=True',
             **EXPECTED_KWARGS
         )

@@ -12,30 +12,36 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Thin wrapper class for talking to the GCE Metadata Server."""
+"""Provides helper methods for talking to the Compute Engine metadata server.
+
+See https://cloud.google.com/compute/docs/metadata
+"""
+
 import datetime
 import httplib2
 import json
+import urllib
 
 from six.moves import http_client
 
 from oauth2client._helpers import _from_bytes
 from oauth2client.client import _UTCNOW
-from oauth2client.client import HttpAccessTokenRefreshError
 
 METADATA_ROOT = 'http://metadata.google.internal/computeMetadata/v1/'
 METADATA_HEADERS = {'Metadata-Flavor': 'Google'}
 
 
-def get(path, recursive=True, http_request=None, root=METADATA_ROOT):
+def get(path, http_request=None, root=METADATA_ROOT, **kwargs):
     if path is None:
         path = []
 
     if not http_request:
         http_request = httplib2.Http().request
 
-    r_string = '/?recursive=true' if recursive else ''
-    full_path = root + '/'.join(path) + r_string
+    if kwargs:
+        path.append('?' + urllib.urlencode(kwargs))
+
+    full_path = root + '/'.join(path)
     response, content = http_request(
         full_path,
         headers=METADATA_HEADERS
@@ -47,21 +53,26 @@ def get(path, recursive=True, http_request=None, root=METADATA_ROOT):
         else:
             return decoded
     else:
-        msg = (
-            'Failed to retrieve {path} from the Google Compute Engine'
-            'metadata service. Response:\n{error}'
-        ).format(path=full_path, error=response)
-        raise httplib2.HttpLib2Error(msg)
+        raise httplib2.HttpLib2Error(
+            (
+                'Failed to retrieve {path} from the Google Compute Engine'
+                'metadata service. Response:\n{error}'
+            ).format(path=full_path, error=response)
+        )
 
 
 def get_service_account_info(service_account='default', http_request=None):
     """ Get information about a service account from the metadata server.
-    :param service_account: a service account email. Left blank information for
-    the default service account of current compute engine instance will be looked up.
-    :param http_request: callable, a callable that matches the method
-    signature of httplib2.Http.request, used to make
-    the refresh request.
-    :return: A dictionary with information about the specified service account.
+
+    Args:
+        service_account: An email specifying the service account for which to
+            look up information. Default will be information for the "default"
+            service account of the current compute engine instance.
+        http_request: callable, a callable that matches the method
+            signature of httplib2.Http.request. Used to make the request to the metadata
+            server.
+    Returns:
+         A dictionary with information about the specified service account.
     """
     return get(
         ['instance', 'service-accounts', service_account],
@@ -71,23 +82,23 @@ def get_service_account_info(service_account='default', http_request=None):
 
 
 def get_token(service_account='default', http_request=None):
-    """Fetch an OAuth access token from the metadata server
-    :param service_account: a service account email. Left blank information for
-    the default service account of current compute engine instance will be looked up.
-    :param http_request: callable, a callable that matches the method
-    signature of httplib2.Http.request, used to make
-    the refresh request.
-    :return:
-    """
-    try:
-        token_json = get(
-            ['instance', 'service-accounts', service_account, 'token'],
-            recursive=False,
-            http_request=http_request
-        )
-    except httplib2.HttpLib2Error as failed_fetch:
-        raise HttpAccessTokenRefreshError(str(failed_fetch))
+    """ Fetch an oauth token for the
 
+    Args:
+        service_account: An email specifying the service account this token should
+            represent. Default will be a token for the "default" service account
+            of the current compute engine instance.
+        http_request: callable, a callable that matches the method
+            signature of httplib2.Http.request. Used to make the request to the metadata
+            server.
+
+    Returns:
+         A dictionary with information about the specified service account.
+    """
+    token_json = get(
+        ['instance', 'service-accounts', service_account, 'token'],
+        http_request=http_request
+    )
     token_expiry = _UTCNOW() + datetime.timedelta(
         seconds=token_json['expires_in'])
     return token_json['access_token'], token_expiry

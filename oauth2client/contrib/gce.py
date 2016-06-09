@@ -17,6 +17,7 @@
 Utilities for making it easier to use OAuth 2.0 on Google Compute Engine.
 """
 
+import httplib2
 import json
 import logging
 import warnings
@@ -25,7 +26,8 @@ import warnings
 from oauth2client._helpers import _from_bytes
 from oauth2client import util
 from oauth2client.client import AssertionCredentials
-from oauth2client.contrib import metadata
+from oauth2client.client import HttpAccessTokenRefreshError
+from oauth2client.contrib import _metadata
 
 
 __author__ = 'jcgregorio@google.com (Joe Gregorio)'
@@ -95,8 +97,11 @@ class AppAssertionCredentials(AssertionCredentials):
         Raises:
             HttpAccessTokenRefreshError: When the refresh fails.
         """
-        self.access_token, self.token_expiry = metadata.get_token(
-            http_request=http_request)
+        try:
+            self.access_token, self.token_expiry = _metadata.get_token(
+                http_request=http_request)
+        except httplib2.HttpLib2Error as e:
+            raise HttpAccessTokenRefreshError(str(e))
 
     @property
     def serialization_data(self):
@@ -141,5 +146,5 @@ class AppAssertionCredentials(AssertionCredentials):
             Compute Engine metadata service.
         """
         if self._service_account_email is None:
-            self._service_account_email = metadata.get_service_account_info()['email']
+            self._service_account_email = _metadata.get_service_account_info()['email']
         return self._service_account_email
