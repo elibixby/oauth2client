@@ -20,9 +20,9 @@ See https://cloud.google.com/compute/docs/metadata
 import datetime
 import httplib2
 import json
-import urllib
 
 from six.moves import http_client
+from six.moves.urllib.parse import urlencode
 
 from oauth2client._helpers import _from_bytes
 from oauth2client.client import _UTCNOW
@@ -39,7 +39,7 @@ def get(path, http_request=None, root=METADATA_ROOT, **kwargs):
         http_request = httplib2.Http().request
 
     if kwargs:
-        path.append('?' + urllib.urlencode(kwargs))
+        path.append('?' + urlencode(kwargs))
 
     full_path = root + '/'.join(path)
     response, content = http_request(
