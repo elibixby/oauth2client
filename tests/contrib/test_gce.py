@@ -19,7 +19,6 @@ import unittest2
 
 import mock
 
-from oauth2client.client import Credentials
 from oauth2client.client import save_to_well_known_file
 from oauth2client.contrib.gce import _SCOPES_WARNING
 from oauth2client.contrib.gce import AppAssertionCredentials
@@ -31,27 +30,23 @@ __author__ = 'jcgregorio@google.com (Joe Gregorio)'
 class AppAssertionCredentialsTests(unittest2.TestCase):
 
     def test_constructor(self):
-        credentials = AppAssertionCredentials(foo='bar')
-        self.assertEqual(credentials.scope, '')
-        self.assertEqual(credentials.kwargs, {'foo': 'bar'})
+        credentials = AppAssertionCredentials()
         self.assertEqual(credentials.assertion_type, None)
 
     @mock.patch('warnings.warn')
-    def test_constructor_with_scopes(self, warn_mock):
-        scope = 'http://example.com/a http://example.com/b'
-        scopes = scope.split()
-        credentials = AppAssertionCredentials(scope=scopes, foo='bar')
-        self.assertEqual(credentials.scope, scope)
-        self.assertEqual(credentials.kwargs, {'foo': 'bar'})
-        self.assertEqual(credentials.assertion_type, None)
+    @mock.patch('oauth2client.contrib.metadata.get_service_account_info',
+                return_value={'scopes': 'a', 'email': 'a@google.com'})
+    def test_constructor_with_valid_scopes(self, metadata, warn_mock):
+        AppAssertionCredentials(scopes=['a'])
         warn_mock.assert_called_once_with(_SCOPES_WARNING)
+        metadata.assert_called_once_with(http_request=None)
 
-    def test_to_json_and_from_json(self):
-        credentials = AppAssertionCredentials()
-        json = credentials.to_json()
-        credentials_from_json = Credentials.new_from_json(json)
-        self.assertEqual(credentials.access_token,
-                         credentials_from_json.access_token)
+    @mock.patch('oauth2client.contrib.metadata.get_service_account_info',
+                return_value={'scopes': 'b', 'email': 'a@google.com'})
+    def test_constructor_with_invalid_scopes(self, metadata):
+        with self.assertRaises(AttributeError):
+            AppAssertionCredentials(scopes=['a'])
+        metadata.assert_called_once_with(http_request=None)
 
     @mock.patch('oauth2client.contrib.metadata.get_token',
                 side_effect=[('A', datetime.datetime.min),
@@ -66,32 +61,43 @@ class AppAssertionCredentialsTests(unittest2.TestCase):
         self.assertEqual(credentials.access_token, 'B')
         self.assertFalse(credentials.access_token_expired)
 
+    @mock.patch('oauth2client.contrib.metadata.get_service_account_info',
+                return_value={'scopes': 'b', 'email': 'a@google.com'})
+    def test_get_scopes(self, metadata):
+        credentials = AppAssertionCredentials()
+        self.assertEqual(credentials.scopes, 'b')
+        # Test Caching
+        self.assertEqual(credentials.scopes, 'b')
+        metadata.assert_called_once_with(http_request=None)
+
+    @mock.patch('warnings.warn')
+    @mock.patch('oauth2client.contrib.metadata.get_service_account_info',
+                return_value={'scopes': 'a', 'email': 'a@google.com'})
+    def test_set_scopes_with_valid_scopes(self, metadata, warn_mock):
+        credentials = AppAssertionCredentials()
+        credentials.scopes = ['a']
+        warn_mock.assert_called_once_with(_SCOPES_WARNING)
+        metadata.assert_called_once_with(http_request=None)
+
+    @mock.patch('oauth2client.contrib.metadata.get_service_account_info',
+                return_value={'scopes': 'b', 'email': 'a@google.com'})
+    def test_set_scopes_with_invalid_scopes(self, metadata):
+        with self.assertRaises(AttributeError):
+            credentials = AppAssertionCredentials()
+            credentials.scopes = ['a']
+        metadata.assert_called_once_with(http_request=None)
+
     def test_serialization_data(self):
         credentials = AppAssertionCredentials()
         self.assertRaises(NotImplementedError, getattr,
                           credentials, 'serialization_data')
 
-    def test_create_scoped_required_without_scopes(self):
+    def test_create_scoped_required(self):
         credentials = AppAssertionCredentials()
         self.assertFalse(credentials.create_scoped_required())
-
-    @mock.patch('warnings.warn')
-    def test_create_scoped_required_with_scopes(self, warn_mock):
-        credentials = AppAssertionCredentials(['dummy_scope'])
-        self.assertFalse(credentials.create_scoped_required())
-        warn_mock.assert_called_once_with(_SCOPES_WARNING)
-
-    @mock.patch('warnings.warn')
-    def test_create_scoped(self, warn_mock):
-        credentials = AppAssertionCredentials()
-        new_credentials = credentials.create_scoped(['dummy_scope'])
-        self.assertNotEqual(credentials, new_credentials)
-        self.assertTrue(isinstance(new_credentials, AppAssertionCredentials))
-        self.assertEqual('dummy_scope', new_credentials.scope)
-        warn_mock.assert_called_once_with(_SCOPES_WARNING)
 
     def test_sign_blob_not_implemented(self):
-        credentials = AppAssertionCredentials([])
+        credentials = AppAssertionCredentials()
         with self.assertRaises(NotImplementedError):
             credentials.sign_blob(b'blob')
 

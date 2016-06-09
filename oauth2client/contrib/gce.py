@@ -33,10 +33,18 @@ __author__ = 'jcgregorio@google.com (Joe Gregorio)'
 logger = logging.getLogger(__name__)
 
 _SCOPES_WARNING = """\
-You have requested explicit scopes to be used with a GCE service account.
-Using this argument will have no effect on the actual scopes for tokens
-requested. These scopes are set at VM instance creation time and
-can't be overridden in the request.
+You have specified explicit scopes to be used with a GCE service account
+credentials, and these scopes *are* present on the credentials.
+However, setting scopes on the GCE service account credentials has no effect
+on the actual scopes for tokens requested. The credentials scopes
+are set at VM instance creation time and can't be overridden in the request.
+To learn more go to https://cloud.google.com/compute/docs/authentication .
+"""
+_SCOPES_ERROR = """\
+You have specified explicit scopes to be used with a GCE service account
+which are not available on the credentials. The scopes are set at VM instance
+creation time and can't be overridden in the request.
+To learn more go to https://cloud.google.com/compute/docs/authentication .
 """
 
 
@@ -53,34 +61,42 @@ class AppAssertionCredentials(AssertionCredentials):
     information to generate and refresh its own access tokens.
     """
 
-    @util.positional(2)
-    def __init__(self, scope='', **kwargs):
-        """Constructor for AppAssertionCredentials
+    def __init__(self, *args, **kwargs):
+        """Constructor for AppAssertionCredentials"""
+        # Cache until Metadata Server supports Cache-Control Header
+        self._service_account_info = None
 
-        Args:
-            scope: string or iterable of strings, scope(s) of the credentials
-                   being requested. Using this argument will have no effect on
-                   the actual scopes for tokens requested. These scopes are
-                   set at VM instance creation time and won't change.
-        """
-        if scope:
-            warnings.warn(_SCOPES_WARNING)
-        # This is just provided for backwards compatibility, but is not
-        # used by this class.
-        self.scope = util.scopes_to_string(scope)
-        self.kwargs = kwargs
+        if 'scopes' in kwargs:
+            self._check_scopes_and_notify(kwargs['scopes'])
 
         # Assertion type is no longer used, but still in the
         # parent class signature.
-        super(AppAssertionCredentials, self).__init__(None)
+        super(AppAssertionCredentials, self).__init__(None, *args, **kwargs)
 
-        # Cache until Metadata Server supports Cache-Control Header
-        self._service_account_email = None
+    def _get_service_account_info(self, http_request=None):
+        if self._service_account_info is None:
+            self._service_account_info = metadata.get_service_account_info(
+                http_request=http_request)
+        return self._service_account_info
 
-    @classmethod
-    def from_json(cls, json_data):
-        data = json.loads(_from_bytes(json_data))
-        return AppAssertionCredentials(data['scope'])
+    def _check_scopes_and_notify(self, scopes):
+        if scopes:
+            if self.has_scopes(scopes):
+                warnings.warn(_SCOPES_WARNING)
+            else:
+                raise AttributeError(_SCOPES_ERROR)
+
+    def _retrieve_scopes(self, http_request):
+        return self._get_service_account_info(
+            http_request=http_request)['scopes']
+
+    @property
+    def scopes(self):
+        return self._get_service_account_info()['scopes']
+
+    @scopes.setter
+    def scopes(self, value):
+        self._check_scopes_and_notify(value)
 
     def _refresh(self, http_request):
         """Refreshes the access_token.
@@ -135,11 +151,6 @@ class AppAssertionCredentials(AssertionCredentials):
         Returns:
             string, The email associated with the Google Compute Engine
             service account.
-
-        Raises:
-            AttributeError, if the email can not be retrieved from the Google
-            Compute Engine metadata service.
         """
-        if self._service_account_email is None:
-            self._service_account_email = metadata.get_service_account_info()['email']
-        return self._service_account_email
+        return self._get_service_account_info()['email']
+
