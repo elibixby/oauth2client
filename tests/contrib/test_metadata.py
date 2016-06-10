@@ -21,12 +21,13 @@ import unittest2
 
 from six.moves import http_client
 
-from oauth2client.client import HttpAccessTokenRefreshError
 from oauth2client.contrib import _metadata
 
-PATH = ['instance', 'service-accounts', 'default']
+PATH = 'instance/service-accounts/default'
 DATA = {'foo': 'bar'}
-EXPECTED_ARGS = ['http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default']
+EXPECTED_URL = (
+    'http://metadata.google.internal/computeMetadata/v1/instance'
+    '/service-accounts/default')
 EXPECTED_KWARGS = dict(headers=_metadata.METADATA_HEADERS)
 
 
@@ -48,7 +49,7 @@ class TestMetadata(unittest2.TestCase):
             _metadata.get(PATH, http_request=http_request),
             DATA
         )
-        http_request.assert_called_once_with(*EXPECTED_ARGS, **EXPECTED_KWARGS)
+        http_request.assert_called_once_with(EXPECTED_URL, **EXPECTED_KWARGS)
 
     def test_get_success_string(self):
         http_request = request_mock(
@@ -57,7 +58,7 @@ class TestMetadata(unittest2.TestCase):
             _metadata.get(PATH, http_request=http_request),
             '<p>Hello World!</p>'
         )
-        http_request.assert_called_once_with(*EXPECTED_ARGS, **EXPECTED_KWARGS)
+        http_request.assert_called_once_with(EXPECTED_URL, **EXPECTED_KWARGS)
 
     def test_get_failure(self):
         http_request = request_mock(
@@ -65,9 +66,11 @@ class TestMetadata(unittest2.TestCase):
         with self.assertRaises(httplib2.HttpLib2Error):
             _metadata.get(PATH, http_request=http_request)
 
-        http_request.assert_called_once_with(*EXPECTED_ARGS, **EXPECTED_KWARGS)
+        http_request.assert_called_once_with(EXPECTED_URL, **EXPECTED_KWARGS)
 
-    @mock.patch('oauth2client.contrib._metadata._UTCNOW', return_value=datetime.datetime.min)
+    @mock.patch(
+        'oauth2client.contrib._metadata._UTCNOW',
+        return_value=datetime.datetime.min)
     def test_get_token_success(self, now):
         http_request = request_mock(
             http_client.OK,
@@ -76,9 +79,10 @@ class TestMetadata(unittest2.TestCase):
         )
         token, expiry = _metadata.get_token(http_request=http_request)
         self.assertEqual(token, 'a')
-        self.assertEqual(expiry, datetime.datetime.min + datetime.timedelta(seconds=100))
+        self.assertEqual(
+            expiry, datetime.datetime.min + datetime.timedelta(seconds=100))
         http_request.assert_called_once_with(
-            EXPECTED_ARGS[0]+'/token',
+            EXPECTED_URL+'/token',
             **EXPECTED_KWARGS
         )
         now.assert_called_once_with()
@@ -89,6 +93,6 @@ class TestMetadata(unittest2.TestCase):
         info = _metadata.get_service_account_info(http_request=http_request)
         self.assertEqual(info, DATA)
         http_request.assert_called_once_with(
-            EXPECTED_ARGS[0]+'/?recursive=True',
+            EXPECTED_URL+'?recursive=True',
             **EXPECTED_KWARGS
         )
