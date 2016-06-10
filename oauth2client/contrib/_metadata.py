@@ -34,6 +34,25 @@ METADATA_HEADERS = {'Metadata-Flavor': 'Google'}
 
 
 def get(path, http_request=None, root=METADATA_ROOT, recursive=None):
+    """Fetch a resource from the metadata server.
+
+    Args:
+        path: A string indicating the resource to retrieve. For example,
+            'instance/service-accounts/defualt'
+        http_request: A callable that matches the method
+            signature of httplib2.Http.request. Used to make the request to the
+            metadataserver.
+        root: A string indicating the full path to the metadata server root.
+        recursive: A boolean indicating whether to do a recursive query of
+            metadata. See
+            https://cloud.google.com/compute/docs/metadata#aggcontents
+
+    Returns:
+        A dictionary if the metadata server returns JSON, otherwise a string.
+
+    Raises:
+        httplib2.Httplib2Error if an error corrured while retrieving metadata.
+    """
     if not http_request:
         http_request = httplib2.Http().request
 
@@ -64,14 +83,18 @@ def get_service_account_info(service_account='default', http_request=None):
         service_account: An email specifying the service account for which to
             look up information. Default will be information for the "default"
             service account of the current compute engine instance.
-        http_request: callable, a callable that matches the method
+        http_request: A callable that matches the method
             signature of httplib2.Http.request. Used to make the request to the
             metadata server.
     Returns:
          A dictionary with information about the specified service account,
          for example:
 
-            {'email': '...', 'scopes': ['scope', ...], 'aliases': 'default'}
+            {
+                'email': '...',
+                'scopes': ['scope', ...],
+                'aliases': ['default', '...']
+            }
     """
     return get(
         'instance/service-accounts/{0}'.format(service_account),
@@ -86,7 +109,7 @@ def get_token(service_account='default', http_request=None):
         service_account: An email specifying the service account this token
             should represent. Default will be a token for the "default" service
             account of the current compute engine instance.
-        http_request: callable, a callable that matches the method
+        http_request: A callable that matches the method
             signature of httplib2.Http.request. Used to make the request to the
             metadataserver.
 
