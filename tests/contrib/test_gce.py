@@ -16,10 +16,11 @@
 
 import datetime
 import json
-import mock
-import unittest2
 
+import mock
 from six.moves import http_client
+from six.moves import urllib
+import unittest2
 
 from oauth2client.client import Credentials
 from oauth2client.client import save_to_well_known_file

@@ -17,11 +17,11 @@
 Utilities for making it easier to use OAuth 2.0 on Google Compute Engine.
 """
 
-import httplib2
 import json
 import logging
 import warnings
 
+import httplib2
 
 from oauth2client._helpers import _from_bytes
 from oauth2client import util
