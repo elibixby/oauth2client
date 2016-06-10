@@ -68,7 +68,10 @@ def get_service_account_info(service_account='default', http_request=None):
             signature of httplib2.Http.request. Used to make the request to the
             metadata server.
     Returns:
-         A dictionary with information about the specified service account.
+         A dictionary with information about the specified service account,
+         for example:
+
+            {'email': '...', 'scopes': ['scope', ...], 'aliases': 'default'}
     """
     return get(
         'instance/service-accounts/{0}'.format(service_account),

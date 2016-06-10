@@ -146,5 +146,6 @@ class AppAssertionCredentials(AssertionCredentials):
             Compute Engine metadata service.
         """
         if self._service_account_email is None:
-            self._service_account_email = _metadata.get_service_account_info()['email']
+            self._service_account_email = (
+                _metadata.get_service_account_info()['email'])
         return self._service_account_email
